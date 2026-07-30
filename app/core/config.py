@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     etl_url: str = "http://127.0.0.1:5001"
     etl_project: str = "Demo"
-    etl_auth: str = "Basic ZGVtb1xkZW1vOkV0bEAyMDIx"
+    etl_auth: str = "Basic ZGVtb1xkZW1vOkV0bEAyMDIx" # Base 64 for demo\demo:Etl@2021
 
     etl_app_dir: str = "/usr/src/app"
     etl_venv: str = "/usr/src/app/.venv/bin/activate"
