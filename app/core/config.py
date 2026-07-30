@@ -19,6 +19,22 @@ class Settings(BaseSettings):
     container: str = "i2b2-etl"
     db_container: str = "i2b2-pg"
 
+    etl_url: str = "http://127.0.0.1:5001"
+    etl_project: str = "Demo"
+    etl_auth: str = "Basic ZGVtb1xkZW1vOkV0bEAyMDIx"
+
+    etl_app_dir: str = "/usr/src/app"
+    etl_venv: str = "/usr/src/app/.venv/bin/activate"
+
+    @property
+    def etl_headers(self) -> dict[str, str]:
+        return {
+            "X-Project-Name": self.etl_project,
+            "authorization": self.etl_auth,
+            "Content-Type": "application/json",
+            "accept": "application/json",
+        }
+
 
 @lru_cache
 def get_settings() -> Settings:
