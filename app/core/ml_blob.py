@@ -1,12 +1,13 @@
 import json
 
+from app.core.config import settings
 from app.core.db import check_code, check_path, query, scalar
 
 
 def load_blob(code: str) -> dict:
     check_code(code)
     raw = scalar(
-        "SELECT concept_blob FROM i2b2demodata.concept_dimension "
+        f"SELECT concept_blob FROM {settings.db_schema}.concept_dimension "
         f"WHERE concept_cd = '{code}';"
     )
     if raw is None:
@@ -23,7 +24,7 @@ def load_blob(code: str) -> dict:
 def is_built(code: str) -> bool:
     check_code(code)
     hit = scalar(
-        "SELECT 1 FROM i2b2demodata.concept_dimension "
+        f"SELECT 1 FROM {settings.db_schema}.concept_dimension "
         f"WHERE concept_cd = '{code}' AND concept_blob LIKE '%serialized_model%';"
     )
     return hit is not None
@@ -33,7 +34,7 @@ def is_built_at_path(path: str) -> bool:
     check_path(path)
     like = path.strip("/").replace("/", "\\\\")
     hit = scalar(
-        "SELECT 1 FROM i2b2demodata.concept_dimension "
+        f"SELECT 1 FROM {settings.db_schema}.concept_dimension "
         f"WHERE concept_path LIKE '\\\\{like}\\\\%' "
         "AND concept_blob LIKE '%serialized_model%';"
     )
@@ -50,7 +51,7 @@ def list_ml_concepts(path_prefix: str) -> list[dict]:
     rows = query(
         "SELECT concept_cd, concept_path, name_char, "
         "  (concept_blob LIKE '%serialized_model%') AS built "
-        "FROM i2b2demodata.concept_dimension "
+        f"FROM {settings.db_schema}.concept_dimension "
         f"WHERE concept_path LIKE '\\\\{like}%' ORDER BY concept_path;"
     )
     return [

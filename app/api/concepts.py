@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.db import query
 
 router = APIRouter()
@@ -18,7 +19,7 @@ def humanize(p: str) -> str:
 def list_concepts() -> list[Concept]:
     rows = query(
         "SELECT concept_cd, concept_path, name_char, concept_type "
-        "FROM i2b2demodata.concept_dimension ORDER BY concept_path;"
+        f"FROM {settings.db_schema}.concept_dimension ORDER BY concept_path;"
     )
     return [Concept(code=r["concept_cd"], path=humanize(r["concept_path"]),
                     name=r["name_char"] or None, type=r["concept_type"] or None)

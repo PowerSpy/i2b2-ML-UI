@@ -14,10 +14,10 @@ class Delete(BaseModel):
 
 @router.delete("/delete-concepts", response_model=Delete)
 def delete_concepts() -> Delete:
-    exec_out = exec(CONTAINER, "source /usr/src/app/.venv/bin/activate", "cd /usr/src/app", "python -m i2b2_cdi concept delete")
+    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", "python -m i2b2_cdi concept delete")
     return Delete(status="ok" if exec_out.returncode == 0 else "error")
 
 @router.delete("/delete-facts", response_model=Delete)
 def delete_facts() -> Delete:
-    exec_out = exec(CONTAINER, "source /usr/src/app/.venv/bin/activate", "cd /usr/src/app", "python -m i2b2_cdi fact delete")
+    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", "python -m i2b2_cdi fact delete")
     return Delete(status="ok" if exec_out.returncode == 0 else "error")

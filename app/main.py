@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
-from app.core.config import settings
+from app.core.config import API_PREFIX, APP_NAME, settings
 from app.core.etl_api import Etl_API_Error
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=APP_NAME)
 
     @app.exception_handler(Etl_API_Error)
     def etl_error(request: Request, exc: Etl_API_Error) -> JSONResponse:
@@ -23,7 +23,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(api_router, prefix=settings.api_prefix)
+    app.include_router(api_router, prefix=API_PREFIX)
     return app
 
 

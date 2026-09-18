@@ -43,7 +43,7 @@ def load_concepts(file: UploadFile = File(...)) -> Load_Out:
         )
 
     concept_load_cmd = f"python -m i2b2_cdi concept load -i {container_path}"
-    exec_out = exec(CONTAINER, "source /usr/src/app/.venv/bin/activate", "cd /usr/src/app", concept_load_cmd)
+    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", concept_load_cmd)
     return Load_Out(
         status="ok" if exec_out.returncode == 0 else "error",
         stdout=exec_out.stdout,
@@ -74,7 +74,7 @@ def load_facts(file: UploadFile = File(...), mrn_are_patient_numbers = True) -> 
     concept_load_cmd = f"python -m i2b2_cdi fact load -i {container_path}"
     if mrn_are_patient_numbers:
         concept_load_cmd += " --mrn-are-patient-numbers"
-    exec_out = exec(CONTAINER, "source /usr/src/app/.venv/bin/activate", "cd /usr/src/app", concept_load_cmd)
+    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", concept_load_cmd)
     return Load_Out(
         status="ok" if exec_out.returncode == 0 else "error",
         stdout=exec_out.stdout,
@@ -84,10 +84,10 @@ def load_facts(file: UploadFile = File(...), mrn_are_patient_numbers = True) -> 
 @router.get("/verify-load", response_model=Verify)
 def verify_load() -> Verify:
     # -tA strips headers leaving only number in stdout
-    fact_out = exec(DB_CONTAINER, "psql -U i2b2 -d i2b2 -tAc \"SELECT count(*) FROM i2b2demodata.observation_fact;\"")
+    fact_out = exec(DB_CONTAINER, f"{settings.psql} -tAc \"SELECT count(*) FROM {settings.db_schema}.observation_fact;\"")
     # Concepts live in their own table — counting them off observation_fact only
     # sees concepts that facts reference, so it drops to 0 when facts are deleted.
-    concept_out = exec(DB_CONTAINER, "psql -U i2b2 -d i2b2 -tAc \"SELECT count(*) FROM i2b2demodata.concept_dimension;\"")
+    concept_out = exec(DB_CONTAINER, f"{settings.psql} -tAc \"SELECT count(*) FROM {settings.db_schema}.concept_dimension;\"")
 
     facts = fact_out.stdout.strip()
     concepts = concept_out.stdout.strip()

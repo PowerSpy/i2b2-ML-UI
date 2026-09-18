@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core import cohorts, db, ml_blob
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -28,10 +29,10 @@ def predictions(code: str, limit: int = 100, target_cohort: str | None = None) -
         raise HTTPException(400, str(e))
 
     total = int(db.scalar(
-        "SELECT count(*) FROM i2b2demodata.observation_fact "
+        f"SELECT count(*) FROM {settings.db_schema}.observation_fact "
         f"WHERE concept_cd = '{code}';") or 0)
     rows = db.query(
-        "SELECT patient_num, start_date FROM i2b2demodata.observation_fact "
+        f"SELECT patient_num, start_date FROM {settings.db_schema}.observation_fact "
         f"WHERE concept_cd = '{code}' ORDER BY patient_num LIMIT {int(limit)};")
 
     scored = None
@@ -57,7 +58,7 @@ def _missing_feature_warnings(code: str) -> list[str]:
 
     present = {
         r["concept_cd"] for r in db.query(
-            "SELECT DISTINCT concept_cd FROM i2b2demodata.observation_fact "
+            f"SELECT DISTINCT concept_cd FROM {settings.db_schema}.observation_fact "
             "WHERE concept_cd IN ("
             + ", ".join(f"'{db.check_code(f)}'" for f in features) + ");"
         )

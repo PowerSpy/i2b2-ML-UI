@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core import cohorts, db, etl_api, ml_blob
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ def apply(body: Apply_In) -> Job_Out:
 def list_jobs(limit: int = 20) -> list[Job]:
     rows = db.query(
         f"SELECT id, {', '.join(JOB_COLUMNS)} "
-        f"FROM i2b2demodata.job ORDER BY id DESC LIMIT {int(limit)};"
+        f"FROM {settings.db_schema}.job ORDER BY id DESC LIMIT {int(limit)};"
     )
     return [_row_to_job(r) for r in rows]
 

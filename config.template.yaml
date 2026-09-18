@@ -1,0 +1,31 @@
+host: 127.0.0.1
+port: 8000
+reload: true
+
+cors_origins:
+  - http://localhost:5173
+  - http://127.0.0.1:5173
+
+container: i2b2-etl
+db_container: i2b2-pg
+
+db_user: i2b2
+db_name: i2b2
+db_schema: i2b2demodata
+
+etl_url: http://127.0.0.1:5001
+etl_project: Demo
+etl_user: 'demo\demo'
+etl_password: 'Etl@2021'
+
+etl_app_dir: /usr/src/app
+etl_venv: /usr/src/app/.venv/bin/activate
+
+i2b2_project: demo
+i2b2_user: demo
+
+ml_root: /ML
+ml_time_buffer: 0
+ml_sample_size_limit: 100000
+ml_test_size: 0.5
+ml_random_seed: 0.42

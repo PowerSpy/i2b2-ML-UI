@@ -29,7 +29,7 @@ def check_path(path: str) -> str:
 
 def query(sql: str, timeout: float = 60.0) -> list[dict]:
     out = exec(settings.db_container,
-               f"psql -U i2b2 -d i2b2 --csv -c {shlex.quote(sql)}",
+               f"{settings.psql} --csv -c {shlex.quote(sql)}",
                timeout=timeout)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or "psql failed")

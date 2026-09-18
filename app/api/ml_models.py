@@ -2,27 +2,26 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core import cohorts, etl_api, ml_blob
+from app.core.config import settings
 
 router = APIRouter()
 
-ML_ROOT = "/ML"
-
+CONCEPT_TYPE = "assertion"
 HEADLINE = ["roc_auc", "pr_auc", "test_roc_auc"]
 THRESHOLDED = ["accuracy", "precision", "recall", "f1", "specificity", "npv", "mcc",
                "balanced_accuracy"]
 COUNTS = ["true_positive", "false_positive", "true_negative", "false_negative",
           "n_pos", "n_neg", "n_samples"]
 
-
 class Blob_In(BaseModel):
     positive_patient_set: list[str]
     negative_patient_set: list[str]
     data_paths: list[str]
     label_paths: list[str]
-    time_buffer: int = 0
-    sample_size_limit: int = 100_000
-    test_size: float = 0.5
-    random_seed: float = 0.42
+    time_buffer: int = settings.ml_time_buffer
+    sample_size_limit: int = settings.ml_sample_size_limit
+    test_size: float = settings.ml_test_size
+    random_seed: float = settings.ml_random_seed
 
 
 class Ml_Concept_In(BaseModel):
@@ -54,7 +53,7 @@ class Metrics(BaseModel):
 
 
 @router.get("/ml-concepts", response_model=list[Ml_Concept])
-def list_ml_concepts(path: str = ML_ROOT) -> list[Ml_Concept]:
+def list_ml_concepts(path: str = settings.ml_root) -> list[Ml_Concept]:
     return [Ml_Concept(**c) for c in ml_blob.list_ml_concepts(path)]
 
 
@@ -83,7 +82,7 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     payload = {
         "code": body.code,
         "path": body.path,
-        "type": "assertion",
+        "type": CONCEPT_TYPE,
         "description": body.description,
         "blob": body.blob.model_dump(),
     }
