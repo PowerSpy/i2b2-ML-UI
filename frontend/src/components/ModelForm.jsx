@@ -1,7 +1,9 @@
 import { useState } from "react";
 
 import { apiPost } from "../lib/api.js";
+import { buildOverrides } from "../lib/hyperparams.js";
 import { CohortMultiPicker } from "./CohortPicker.jsx";
+import ModelTypePicker from "./ModelTypePicker.jsx";
 import PathPicker from "./PathPicker.jsx";
 import Warning, { Warnings } from "./Warning.jsx";
 
@@ -22,18 +24,38 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
   const [labelPaths, setLabelPaths] = useState([]);
   const [advanced, setAdvanced] = useState(false);
   const [opts, setOpts] = useState(Object.fromEntries(ADVANCED));
+  const [modelType, setModelType] = useState("logistic");
+  const [hyperFields, setHyperFields] = useState([]);
+  const [hyperValues, setHyperValues] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [warnings, setWarnings] = useState([]);
+  const [hyperErrors, setHyperErrors] = useState([]);
 
   const path = code ? `/ML/Diagnosis/${code}` : "";
   const apostrophe = description.includes("'");
   const overlap = positive.filter((p) => negative.includes(p));
-  const canSubmit =
-    code && description && !apostrophe && positive.length && negative.length &&
-    dataPaths.length && !busy;
+
+  // Named so the button can say what it is still waiting for. A disabled
+  // button on a form long enough to scroll is otherwise silent: the fields
+  // holding it back are off-screen above the button you are clicking.
+  const missing = [
+    !code && "code",
+    !description && "description",
+    !positive.length && "at least one positive cohort",
+    !negative.length && "at least one negative cohort",
+    !dataPaths.length && "at least one data path",
+  ].filter(Boolean);
+
+  const canSubmit = missing.length === 0 && !apostrophe && !busy;
 
   async function submit() {
+    const hyper = buildOverrides(modelType, hyperFields, hyperValues);
+    if (!hyper.ok) {
+      setHyperErrors(hyper.errors);
+      return;
+    }
+    setHyperErrors([]);
     setBusy(true);
     setError(null);
     setWarnings([]);
@@ -47,6 +69,8 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
           negative_patient_set: negative,
           data_paths: dataPaths,
           label_paths: labelPaths,
+          model_type: modelType,
+          hyperparameters: hyper.overrides,
           ...opts,
         },
       });
@@ -142,6 +166,26 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
         />
       </div>
 
+      <div className="space-y-3 border-t border-neutral-800 pt-4">
+        <ModelTypePicker
+          value={modelType}
+          onChange={(key, fields) => {
+            setModelType(key);
+            setHyperFields(fields);
+            setHyperErrors([]);
+          }}
+          values={hyperValues}
+          onValuesChange={setHyperValues}
+        />
+        {hyperErrors.length > 0 && (
+          <ul className="space-y-0.5 text-xs text-red-400">
+            {hyperErrors.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div>
         <button
           onClick={() => setAdvanced((a) => !a)}
@@ -171,13 +215,21 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
         )}
       </div>
 
-      <button
-        onClick={submit}
-        disabled={!canSubmit}
-        className="rounded bg-sky-800 px-3 py-1.5 text-sm text-sky-50 hover:bg-sky-700 disabled:opacity-40"
-      >
-        {busy ? "saving…" : "Save model config"}
-      </button>
+      <div className="space-y-1">
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          className="rounded bg-sky-800 px-3 py-1.5 text-sm text-sky-50 hover:bg-sky-700 disabled:opacity-40"
+        >
+          {busy ? "saving…" : "Save model config"}
+        </button>
+        {missing.length > 0 && (
+          <p className="text-xs text-amber-300/80">
+            Still needed: {missing.join(", ")}. Nothing is saved — and step 4
+            only lists models that have been.
+          </p>
+        )}
+      </div>
 
       <Warnings items={warnings} />
       {error && (

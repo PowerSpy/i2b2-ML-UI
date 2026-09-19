@@ -29,6 +29,8 @@ export default function MetricsPanel({ code, refreshKey = 0 }) {
 
   return (
     <div className="space-y-4">
+      <ModelIdentity data={data} />
+
       <div className="flex flex-wrap items-end gap-8">
         <div>
           <p className="text-4xl font-semibold tabular-nums text-emerald-400">
@@ -104,6 +106,77 @@ export default function MetricsPanel({ code, refreshKey = 0 }) {
               </span>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/*
+ * What actually trained, read off the fitted estimator at build time.
+ *
+ * Worth showing rather than assuming: an unrecognised model_type does not
+ * fail the build, it quietly trains logistic regression instead — so the
+ * requested algorithm is not evidence of what you got. clf_type is missing on
+ * models built before the registry patch, which is itself worth saying.
+ */
+function ModelIdentity({ data }) {
+  const { model_type: type, model_name: name, clf_type: clf } = data;
+  const hyper = Object.entries(data.hyperparameters ?? {});
+
+  if (!type && !clf) {
+    return (
+      <p className="text-xs text-neutral-500">
+        Built before model selection existed — algorithm not recorded.
+      </p>
+    );
+  }
+
+  // The registry's own display name for a key, e.g. random_forest →
+  // RandomForest; a mismatch against clf_type means the wiring is broken.
+  const expected = { RandomForest: "RandomForestClassifier", SVM: "SVC",
+    LogisticRegression: "LogisticRegression", XGBoost: "XGBClassifier",
+    KNN: "KNeighborsClassifier", NaiveBayes: "GaussianNB",
+    DecisionTree: "DecisionTreeClassifier", DummyBaseline: "DummyClassifier",
+    ANN: "MLPClassifier" }[name];
+  const mismatch = expected && clf && expected !== clf;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-200">
+          {name ?? type}
+        </span>
+        {clf && (
+          <span className={mismatch ? "text-red-400" : "text-neutral-500"}>
+            trained {clf}
+          </span>
+        )}
+        {!clf && (
+          <span className="text-neutral-600">
+            estimator class not recorded for this build
+          </span>
+        )}
+      </div>
+
+      {mismatch && (
+        <p className="rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-300">
+          Asked for {name} but {clf} was trained. The registry is not wired
+          through — re-apply the model registry patch before trusting these
+          numbers.
+        </p>
+      )}
+
+      {hyper.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {hyper.map(([k, v]) => (
+            <span
+              key={k}
+              className="rounded bg-neutral-800/60 px-1.5 py-0.5 text-[10px] text-neutral-400"
+            >
+              {k.replace(/^clf__/, "")}={JSON.stringify(v).replace(/^\[|\]$/g, "")}
+            </span>
+          ))}
         </div>
       )}
     </div>

@@ -1,12 +1,19 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+import json
 
-from app.core import cohorts, etl_api, ml_blob
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, field_validator
+
+from app.core import cohorts, etl_api, ml_blob, ml_registry
 from app.core.config import settings
 
 router = APIRouter()
 
 CONCEPT_TYPE = "assertion"
+
+
+def _coded_path(path: str) -> str:
+    """/ML/Foo/bar -> \\ML\\Foo\\bar\\ — how concept_path is stored."""
+    return "\\" + path.strip("/").replace("/", "\\") + "\\"
 HEADLINE = ["roc_auc", "pr_auc", "test_roc_auc"]
 THRESHOLDED = ["accuracy", "precision", "recall", "f1", "specificity", "npv", "mcc",
                "balanced_accuracy"]
@@ -18,10 +25,53 @@ class Blob_In(BaseModel):
     negative_patient_set: list[str]
     data_paths: list[str]
     label_paths: list[str]
+    # Read by apply_build_model_ml.py as blob["model_type"] / blob["hyperparameters"]
+    # and passed to the registry's build_model(). Values in the override grid are
+    # lists because they replace entries in a GridSearchCV param grid; a bare
+    # scalar makes the search iterate the value itself.
+    model_type: str = "logistic"
+    hyperparameters: dict[str, list] = {}
     time_buffer: int = settings.ml_time_buffer
     sample_size_limit: int = settings.ml_sample_size_limit
     test_size: float = settings.ml_test_size
     random_seed: float = settings.ml_random_seed
+
+    @field_validator("model_type")
+    @classmethod
+    def _known_model(cls, v: str) -> str:
+        v = v.lower()
+        # build_model() falls back to logistic regression for an unknown key
+        # without raising, so an unchecked typo here trains the wrong model and
+        # reports success. Reject it at the edge instead.
+        known = ml_registry.known_keys()
+        if v not in known:
+            raise ValueError(f"unknown model_type {v!r}; known: {', '.join(sorted(known))}")
+        return v
+
+    @field_validator("hyperparameters")
+    @classmethod
+    def _grid_keys(cls, v: dict[str, list]) -> dict[str, list]:
+        bad = sorted(k for k in v if not k.startswith(ml_registry.GRID_PREFIXES))
+        if bad:
+            raise ValueError(
+                f"hyperparameter key(s) {', '.join(bad)} must start with "
+                f"{' or '.join(ml_registry.GRID_PREFIXES)} to match a grid entry"
+            )
+        empty = sorted(k for k, vals in v.items() if not vals)
+        if empty:
+            raise ValueError(f"hyperparameter key(s) {', '.join(empty)} have no values")
+        # The ETL stores the blob as a Python repr and later repairs it into
+        # JSON by swapping quote characters. None survives that intact and is
+        # not valid JSON, so one null here makes the whole blob unparseable and
+        # the build dies with "Expecting value: line 1 column N". Omit the key
+        # instead — the model's default grid for it still applies.
+        nulls = sorted(k for k, vals in v.items() if any(x is None for x in vals))
+        if nulls:
+            raise ValueError(
+                f"hyperparameter key(s) {', '.join(nulls)} contain null, which "
+                "corrupts the stored blob — omit the key to use the model's default"
+            )
+        return v
 
 
 class Ml_Concept_In(BaseModel):
@@ -36,6 +86,27 @@ class Ml_Concept(BaseModel):
     path: str
     description: str | None = None
     is_built: bool
+    model_type: str | None = None
+    # The estimator class actually fitted, recorded at build time. Only set on
+    # models built since the registry patch; older ones report None.
+    clf_type: str | None = None
+
+
+class Model_Field(BaseModel):
+    id: str
+    label: str
+    grid_key: str | None = None
+    min: float
+    max: float
+    default: float | None = None
+    allow_blank: bool = False
+
+
+class Model_Type(BaseModel):
+    key: str
+    name: str
+    note: str = ""
+    fields: list[Model_Field] = []
 
 
 class Ml_Concept_Out(BaseModel):
@@ -50,6 +121,27 @@ class Metrics(BaseModel):
     features: list[str]
     build_time_sec: float | None = None
     threshold_note: str
+    model_type: str | None = None
+    model_name: str | None = None
+    clf_type: str | None = None
+    hyperparameters: dict[str, list] = {}
+
+
+class Plots(BaseModel):
+    images: dict[str, str]
+    # Counts drawn into the plots, which are computed at the 0.5 cutoff the
+    # stored model predicts at - not at the F1-optimal threshold the headline
+    # metrics use. The two disagree, so they are kept apart deliberately.
+    counts_at_half: dict[str, int] = {}
+    note: str
+
+
+@router.get("/ml-model-types", response_model=list[Model_Type])
+def list_model_types() -> list[Model_Type]:
+    try:
+        return [Model_Type(**m) for m in ml_registry.list_model_types()]
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
 
 
 @router.get("/ml-concepts", response_model=list[Ml_Concept])
@@ -79,14 +171,25 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     if ml_blob.is_built(body.code):
         warnings.append("this replaces the existing trained model — no history is kept")
 
-    payload = {
-        "code": body.code,
-        "path": body.path,
-        "type": CONCEPT_TYPE,
-        "description": body.description,
-        "blob": body.blob.model_dump(),
-    }
-    etl_api.post("/etl/concepts", json=payload)
+    blob = body.blob.model_dump()
+
+    if ml_blob.exists(body.code):
+        # POST on an existing code answers 200 and changes nothing, so a
+        # re-save would silently keep the old algorithm while reporting
+        # success. The update path is a PUT that takes the blob as a query
+        # parameter, not in the body (concept_API.py:138).
+        etl_api.put(
+            "/etl/concepts",
+            params={"cpath": _coded_path(body.path), "blob": json.dumps(blob)},
+        )
+    else:
+        etl_api.post("/etl/concepts", json={
+            "code": body.code,
+            "path": body.path,
+            "type": CONCEPT_TYPE,
+            "description": body.description,
+            "blob": blob,
+        })
     return Ml_Concept_Out(code=body.code, warnings=warnings)
 
 
@@ -124,5 +227,37 @@ def metrics(code: str) -> Metrics:
         threshold_note=(
             "All metrics except roc_auc/pr_auc are reported at the F1-optimal threshold; "
             "the stored model predicts at 0.5."
+        ),
+        model_type=blob.get("model_type"),
+        model_name=blob.get("model_name"),
+        clf_type=blob.get("clf_type"),
+        hyperparameters=blob.get("hyperparameters") or {},
+    )
+
+
+@router.get("/ml-concepts/{code}/plots", response_model=Plots)
+def plots(code: str) -> Plots:
+    try:
+        blob = ml_blob.load_blob(code)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    if "serialized_model" not in blob:
+        raise HTTPException(409, "model has not been built yet")
+
+    counts = {
+        k.removeprefix("confusion_"): int(blob[k])
+        for k in ("confusion_tp", "confusion_fp", "confusion_tn", "confusion_fn")
+        if isinstance(blob.get(k), (int, float))
+    }
+    return Plots(
+        images=ml_blob.plots(blob),
+        counts_at_half=counts,
+        note=(
+            "Plots score the test set at the 0.5 cutoff the stored model predicts at, "
+            "so these counts differ from the headline metrics, which use the F1-optimal "
+            "threshold."
         ),
     )

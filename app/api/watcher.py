@@ -53,7 +53,14 @@ class Watcher_Log(BaseModel):
 
 @router.get("/watcher", response_model=Watcher_Status)
 def watcher_status() -> Watcher_Status:
-    out = exec(settings.container, f"python -c {shlex.quote(PROBE)}")
+    # The venv has to be sourced first: there is no `python` on the container's
+    # default PATH, so without this the probe exits 127 and every check reports
+    # zero watchers. That silent always-stopped reading is worse than it looks —
+    # watcher_start() trusts it, so each start spawns another daemon on top of
+    # the one already polling.
+    out = exec(settings.container,
+               f"source {settings.etl_venv}",
+               f"python -c {shlex.quote(PROBE)}")
     lines = out.stdout.strip().splitlines()
     count = int(lines[0]) if lines and lines[0].strip().isdigit() else 0
     return Watcher_Status(running=count > 0, count=count,

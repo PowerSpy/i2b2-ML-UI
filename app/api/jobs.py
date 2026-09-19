@@ -53,6 +53,16 @@ def _wipe_warning(path: str) -> str:
 
 @router.post("/jobs/build", response_model=Job_Out)
 def build(body: Build_In) -> Job_Out:
+    # Without this the job queues happily and then dies in the worker with
+    # "'NoneType' object has no attribute 'replace'", which says nothing about
+    # the actual problem: there is no model config at this path.
+    if not ml_blob.has_config_at_path(body.path):
+        raise HTTPException(
+            409,
+            f"no model config at {body.path} — define the model in step 3 first. "
+            "(Folders in the concept tree are not models.)",
+        )
+
     res = etl_api.post("/etl/job", json={
         "input": {"path": body.path},
         "jobType": "ml",
