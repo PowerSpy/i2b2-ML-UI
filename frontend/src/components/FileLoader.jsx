@@ -1,6 +1,9 @@
 import { useRef, useState } from "react";
 
 import { apiUpload } from "../lib/api.js";
+import { count, plural } from "../lib/format.js";
+import Callout from "../ui/Callout.jsx";
+import { Num, SectionLabel } from "../ui/Text.jsx";
 
 /**
  * Drop target for one CSV upload. `endpoint` is the loader route, `params` any
@@ -38,10 +41,11 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
   }
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       {children}
 
-      <div
+      <button
+        type="button"
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -49,15 +53,15 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-10 text-center transition-colors ${
+        className={`w-full cursor-pointer rounded-card border border-dashed p-8 text-center transition-colors ${
           dragging
-            ? "border-sky-400 bg-sky-950/30"
-            : "border-neutral-700 hover:border-neutral-500"
+            ? "border-accent bg-accent/5"
+            : "border-border hover:border-border-strong"
         }`}
       >
-        <p className="text-sm text-neutral-300">{busy ? "Loading…" : prompt}</p>
+        <p className="text-[13px] text-text-2">{busy ? "Loading…" : prompt}</p>
         {name && !busy && (
-          <p className="mt-2 text-xs text-neutral-500">{name}</p>
+          <p className="mt-1.5 font-mono text-[11px] text-text-muted">{name}</p>
         )}
         <input
           ref={inputRef}
@@ -66,12 +70,12 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
           className="hidden"
           onChange={(e) => upload(e.target.files?.[0])}
         />
-      </div>
+      </button>
 
       {error && (
-        <p className="rounded border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        <Callout tone="danger" title="upload failed">
           {error}
-        </p>
+        </Callout>
       )}
 
       {result && (
@@ -81,36 +85,26 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
             the file or skipped it, so "ok" on its own never meant anything had
             been loaded.
           */}
-          <p className="text-sm">
+          <p className="text-[13px]">
             {result.rows_loaded != null ? (
-              <>
-                <span
-                  className={
-                    result.rows_loaded > 0 ? "text-emerald-400" : "text-red-400"
-                  }
-                >
-                  {result.rows_loaded.toLocaleString()} row
-                  {result.rows_loaded === 1 ? "" : "s"} loaded
-                </span>
-              </>
+              <span className={result.rows_loaded > 0 ? "text-positive" : "text-danger"}>
+                <Num>{count(result.rows_loaded)}</Num>{" "}
+                {plural(result.rows_loaded, "row")} loaded
+              </span>
             ) : (
-              <>
+              <span className="text-text-3">
                 status:{" "}
-                <span
-                  className={
-                    result.status === "ok" ? "text-emerald-400" : "text-red-400"
-                  }
-                >
+                <span className={result.status === "ok" ? "text-positive" : "text-danger"}>
                   {result.status}
                 </span>
-              </>
+              </span>
             )}
           </p>
 
           {result.note && (
-            <p className="rounded border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
+            <Callout tone="warn" title="nothing was loaded">
               {result.note}
-            </p>
+            </Callout>
           )}
 
           <Output label="stdout" text={result.stdout} />
@@ -121,14 +115,16 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
   );
 }
 
+/**
+ * The CLI's own log. Usually the only place the reason for a failure exists,
+ * so it is shown in full rather than summarised.
+ */
 function Output({ label, text }) {
   if (!text) return null;
   return (
     <div>
-      <p className="mb-1 text-xs uppercase tracking-wide text-neutral-500">
-        {label}
-      </p>
-      <pre className="max-h-64 overflow-auto rounded bg-neutral-900 p-3 text-xs whitespace-pre-wrap text-neutral-300">
+      <SectionLabel className="mb-1.5">{label}</SectionLabel>
+      <pre className="max-h-64 overflow-auto rounded-row border border-border-soft bg-panel-sunk p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-text-3">
         {text}
       </pre>
     </div>

@@ -1,14 +1,101 @@
 import { useState } from "react";
 
 import { apiDelete, apiPost } from "../lib/api.js";
-import Warning from "./Warning.jsx";
+import { count } from "../lib/format.js";
+import Button from "../ui/Button.jsx";
+import Callout, { Empty } from "../ui/Callout.jsx";
+import { Status } from "../ui/Status.jsx";
+import { Table, Td, Th, ThHidden } from "../ui/Table.jsx";
+import { Mono, Num } from "../ui/Text.jsx";
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
+const FIELD =
+  "min-h-[44px] w-full rounded-btn border border-border-strong bg-panel-sunk px-3 text-[13px] text-text placeholder:text-text-muted";
+
 /**
- * Cohorts survive `wipe concepts` / `wipe facts`, so recorded set_size and live
- * membership drift apart. Both are shown; a mismatch is flagged.
+ * Recorded size against live membership.
+ *
+ * Cohorts survive `wipe concepts` and `wipe facts`, so the set_size recorded
+ * when the set was built and the number of members that still have facts drift
+ * apart. Both are shown; a mismatch is the "drifted" state.
  */
+export function CohortsTable({ cohorts, onDelete, busy }) {
+  if (!cohorts.length) {
+    return (
+      <Empty>
+        No patient sets yet. A cohort is every patient holding one concept code
+        — you need one per class to train, plus one for the population you want
+        to score.
+      </Empty>
+    );
+  }
+
+  return (
+    <Table>
+      <thead>
+        <tr>
+          <Th>name</Th>
+          <Th>id</Th>
+          <Th align="right">recorded</Th>
+          <Th align="right">live</Th>
+          <Th>state</Th>
+          {onDelete && <ThHidden>delete</ThHidden>}
+        </tr>
+      </thead>
+      <tbody>
+        {cohorts.map((c) => {
+          const live = c.live ?? c.size;
+          const drift = live - c.size;
+          return (
+            <tr key={c.id}>
+              <Td>
+                <Mono className="text-text">{c.name}</Mono>
+              </Td>
+              <Td>
+                <Num className="text-text-muted">{c.id}</Num>
+              </Td>
+              <Td align="right">
+                <Num>{count(c.size)}</Num>
+              </Td>
+              <Td align="right">
+                <Num className={c.stale ? "text-warn" : "text-text-2"}>
+                  {count(live)}
+                </Num>
+              </Td>
+              <Td>
+                {c.duplicate ? (
+                  <Status tone="danger">duplicate name</Status>
+                ) : c.stale ? (
+                  <Status tone="warn">
+                    drifted — {count(Math.abs(drift))}{" "}
+                    {drift < 0 ? "lost since" : "added since"}
+                  </Status>
+                ) : (
+                  <Status tone="positive">stable</Status>
+                )}
+              </Td>
+              {onDelete && (
+                <Td align="right">
+                  <button
+                    type="button"
+                    onClick={() => onDelete(c.id)}
+                    disabled={busy}
+                    className="min-h-[44px] px-2 text-[12px] text-danger hover:underline disabled:opacity-50"
+                  >
+                    delete
+                  </button>
+                </Td>
+              )}
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
+
+/** The table plus the controls that change it. */
 export default function CohortsPanel({ cohorts, concepts, onChange }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -16,223 +103,139 @@ export default function CohortsPanel({ cohorts, concepts, onChange }) {
   const [error, setError] = useState(null);
   const [wipeArmed, setWipeArmed] = useState(false);
 
-  // Live counts arrive with the cohort list itself. This used to be one request
-  // per cohort — each costing two container round trips — refired on every
-  // refresh, for a number the list query can compute in a single join.
-  const sizes = Object.fromEntries(
-    cohorts.map((c) => [c.id, { live: c.live ?? c.size, stale: !!c.stale }]),
-  );
-
   const duplicate = cohorts.some((c) => c.name === name);
   const validName = NAME_RE.test(name);
   const canCreate = validName && !duplicate && code && !busy;
 
-  async function create() {
+  async function run(fn) {
     setBusy(true);
     setError(null);
     try {
+      await fn();
+      onChange?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const create = () =>
+    run(async () => {
       await apiPost("/cohorts", { name, concept_code: code });
       setName("");
-      onChange?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+    });
 
-  async function remove(id) {
-    setBusy(true);
-    setError(null);
-    try {
-      await apiDelete(`/cohorts/${id}`);
-      onChange?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const remove = (id) => run(() => apiDelete(`/cohorts/${id}`));
 
-  async function wipe() {
-    setBusy(true);
-    setError(null);
+  const wipe = () => {
     setWipeArmed(false);
-    try {
-      await apiDelete("/cohorts");
-      onChange?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+    return run(() => apiDelete("/cohorts"));
+  };
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-neutral-500">
-        A cohort is every patient holding the concept code you pick. Build one
-        per class for training, plus one for the population you want to score.
-      </p>
+    <div className="space-y-5">
+      <CohortsTable cohorts={cohorts} onDelete={remove} busy={busy} />
 
-      {cohorts.length > 0 && (
-        <table className="w-full text-left text-xs">
-          <thead className="text-neutral-500">
-            <tr>
-              <th className="pb-2 font-normal">name</th>
-              <th className="pb-2 font-normal">id</th>
-              <th className="pb-2 text-right font-normal">recorded</th>
-              <th className="pb-2 text-right font-normal">live</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody className="text-neutral-300">
-            {cohorts.map((c) => {
-              const live = sizes[c.id];
-              return (
-                <tr key={c.id} className="border-t border-neutral-800/70">
-                  <td className="py-2">
-                    {c.name}
-                    {c.duplicate && (
-                      <span className="ml-2 rounded bg-red-950 px-1.5 py-0.5 text-[10px] text-red-300">
-                        duplicate name
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 text-neutral-500">{c.id}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {c.size.toLocaleString()}
-                  </td>
-                  <td className="py-2 text-right tabular-nums">
-                    {live == null ? (
-                      <span className="text-neutral-600">…</span>
-                    ) : (
-                      <span
-                        className={live.stale ? "text-amber-400" : undefined}
-                      >
-                        {live.live.toLocaleString()}
-                        {live.stale && " stale"}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 text-right">
-                    <button
-                      onClick={() => remove(c.id)}
-                      disabled={busy}
-                      className="text-red-400 hover:text-red-300 disabled:opacity-50"
-                    >
-                      delete
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {cohorts.some((c) => sizes[c.id]?.stale) && (
-        <Warning>
+      {cohorts.some((c) => c.stale) && (
+        <Callout tone="warn" title="stale membership">
           A stale cohort still lists members whose facts were wiped. Training on
           one silently uses fewer patients than its size suggests.
-        </Warning>
+        </Callout>
       )}
 
       {cohorts.some((c) => c.duplicate) && (
-        <Warning>
+        <Callout tone="danger" title="ambiguous name">
           Two or more patient sets share a name. Training resolves a cohort name
           to <em>every</em> set carrying it and unions them, so a model would
           train on the combination rather than the one you meant. Delete the
           ones you do not want — models refuse to save against an ambiguous
           name.
-        </Warning>
+        </Callout>
       )}
 
-      <div className="flex flex-wrap items-end gap-2 border-t border-neutral-800 pt-4">
-        <div>
-          <label className="mb-1 block text-xs text-neutral-500">name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="positive_cases"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm"
-          />
+      <div className="space-y-3 border-t border-border-soft pt-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-52">
+            <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="cohort-name">
+              name
+            </label>
+            <input
+              id="cohort-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="positive_cases"
+              className={`${FIELD} font-mono`}
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="cohort-code">
+              from concept code
+            </label>
+            <select
+              id="cohort-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className={`${FIELD} font-mono`}
+            >
+              <option value="">— pick a concept —</option>
+              {concepts.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} {c.type ? `(${c.type})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button variant="primary" onClick={create} disabled={!canCreate}>
+            {busy ? "working…" : "Create cohort"}
+          </Button>
         </div>
-        <div className="min-w-0 flex-1">
-          <label className="mb-1 block text-xs text-neutral-500">
-            from concept code
-          </label>
-          <select
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm"
-          >
-            <option value="">— pick a concept —</option>
-            {concepts.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.code} {c.type ? `(${c.type})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          onClick={create}
-          disabled={!canCreate}
-          className="rounded bg-sky-800 px-3 py-1.5 text-sm text-sky-50 hover:bg-sky-700 disabled:opacity-40"
-        >
-          {busy ? "working…" : "Create"}
-        </button>
+
+        {name && !validName && (
+          <p className="text-[12px] text-danger">
+            letters, digits, underscore and hyphen only (max 80)
+          </p>
+        )}
+        {duplicate && (
+          <p className="text-[12px] text-danger">
+            a cohort called <Mono>{name}</Mono> already exists — names must be
+            unique
+          </p>
+        )}
+        {concepts.length === 0 && (
+          <p className="text-[12px] text-text-muted">
+            no concepts loaded, so there is nothing to build a cohort from
+          </p>
+        )}
+        <p className="text-[12px] text-text-muted">
+          Pick an <Mono>assertion</Mono> concept, not a <Mono>float</Mono> one. A
+          cohort from a measurement column means &ldquo;everyone who has that
+          measurement&rdquo; — usually everybody, with no error.
+        </p>
       </div>
 
-      {name && !validName && (
-        <p className="text-xs text-red-400">
-          letters, digits, underscore and hyphen only (max 80)
-        </p>
-      )}
-      {duplicate && (
-        <p className="text-xs text-red-400">
-          a cohort called {name} already exists — names must be unique
-        </p>
-      )}
-      {concepts.length === 0 && (
-        <p className="text-xs text-neutral-500">
-          no concepts loaded, so there is nothing to build a cohort from
-        </p>
-      )}
-
       {error && (
-        <p className="rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">
+        <Callout tone="danger" title="request failed">
           {error}
-        </p>
+        </Callout>
       )}
 
       {cohorts.length > 0 && (
-        <div className="border-t border-neutral-800 pt-3 text-xs">
+        <div className="border-t border-border-soft pt-4">
           {wipeArmed ? (
-            <span className="flex items-center gap-2">
-              <span className="text-neutral-300">
-                Delete all {cohorts.length} cohorts?
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[12px] text-text-2">
+                Delete all <Num>{cohorts.length}</Num> cohorts?
               </span>
-              <button
-                onClick={wipe}
-                className="rounded bg-red-900 px-2 py-1 text-red-100 hover:bg-red-800"
-              >
-                yes, delete
-              </button>
-              <button
-                onClick={() => setWipeArmed(false)}
-                className="rounded border border-neutral-700 px-2 py-1 text-neutral-300"
-              >
-                cancel
-              </button>
-            </span>
+              <Button variant="danger" onClick={wipe}>
+                yes, delete all
+              </Button>
+              <Button onClick={() => setWipeArmed(false)}>cancel</Button>
+            </div>
           ) : (
-            <button
-              onClick={() => setWipeArmed(true)}
-              className="text-red-400 hover:text-red-300"
-            >
-              delete all cohorts
-            </button>
+            <Button variant="quiet" className="px-0" onClick={() => setWipeArmed(true)}>
+              <span className="text-danger">delete all cohorts</span>
+            </Button>
           )}
         </div>
       )}

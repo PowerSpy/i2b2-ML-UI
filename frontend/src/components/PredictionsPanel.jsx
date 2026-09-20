@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { apiGet } from "../lib/api.js";
-import Warning, { Warnings } from "./Warning.jsx";
+import { count } from "../lib/format.js";
+import Callout from "../ui/Callout.jsx";
+import { Stat } from "../ui/Meter.jsx";
+import { Num, SectionLabel } from "../ui/Text.jsx";
 
 /** Prediction facts written back by an apply run. */
 export default function PredictionsPanel({ code, targetCohort, refreshKey = 0 }) {
@@ -16,7 +19,7 @@ export default function PredictionsPanel({ code, targetCohort, refreshKey = 0 })
     const qs = targetCohort
       ? `?target_cohort=${encodeURIComponent(targetCohort)}`
       : "";
-    apiGet(`/predictions/${code}${qs}`)
+    apiGet(`/predictions/${encodeURIComponent(code)}${qs}`)
       .then((d) => alive && setData(d))
       .catch((e) => alive && setError(e.message));
     return () => {
@@ -25,41 +28,39 @@ export default function PredictionsPanel({ code, targetCohort, refreshKey = 0 })
   }, [code, targetCohort, refreshKey]);
 
   if (!code) return null;
-  if (error) return <p className="text-xs text-red-400">{error}</p>;
-  if (!data) return <p className="text-xs text-neutral-500">loading…</p>;
+  if (error)
+    return (
+      <Callout tone="danger" title="could not read predictions">
+        {error}
+      </Callout>
+    );
+  if (!data) return <p className="text-[12px] text-text-muted">loading…</p>;
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-8">
-        <div>
-          <p className="text-2xl font-semibold tabular-nums">
-            {data.total.toLocaleString()}
-          </p>
-          <p className="text-xs uppercase tracking-wide text-neutral-500">
-            predicted positive
-          </p>
-        </div>
+    <div className="space-y-4">
+      <div className="flex gap-10">
+        <Stat value={count(data.total)} label="predicted positive" />
         {data.scored != null && (
-          <div>
-            <p className="text-2xl font-semibold tabular-nums text-neutral-400">
-              {data.scored.toLocaleString()}
-            </p>
-            <p className="text-xs uppercase tracking-wide text-neutral-500">
-              scored
-            </p>
-          </div>
+          <Stat value={count(data.scored)} label="scored" tone={undefined} />
         )}
       </div>
 
-      <Warning>{data.note}</Warning>
-      <Warnings items={data.warnings} />
+      <Callout tone="warn" title="absence is not a negative">
+        {data.note}
+      </Callout>
+
+      {data.warnings.map((w) => (
+        <Callout key={w} tone="danger" title="features missing">
+          {w}
+        </Callout>
+      ))}
 
       {data.patients.length > 0 && (
         <div>
-          <p className="mb-1 text-xs text-neutral-500">
-            first {data.patients.length} patient numbers
-          </p>
-          <p className="max-h-32 overflow-auto rounded bg-neutral-900 p-2 text-xs tabular-nums text-neutral-400">
+          <SectionLabel className="mb-1.5">
+            first <Num>{data.patients.length}</Num> patient numbers
+          </SectionLabel>
+          <p className="max-h-32 overflow-auto rounded-row border border-border-soft bg-panel-sunk p-3 font-mono text-[11px] leading-relaxed tabular-nums text-text-3">
             {data.patients.join(", ")}
           </p>
         </div>

@@ -2,10 +2,12 @@ import { useState } from "react";
 
 import { apiPost } from "../lib/api.js";
 import { buildOverrides } from "../lib/hyperparams.js";
+import Button from "../ui/Button.jsx";
+import Callout from "../ui/Callout.jsx";
+import { Mono } from "../ui/Text.jsx";
 import { CohortMultiPicker } from "./CohortPicker.jsx";
 import ModelTypePicker from "./ModelTypePicker.jsx";
 import PathPicker from "./PathPicker.jsx";
-import Warning, { Warnings } from "./Warning.jsx";
 
 const ADVANCED = [
   ["time_buffer", 0],
@@ -13,6 +15,9 @@ const ADVANCED = [
   ["test_size", 0.5],
   ["random_seed", 0.42],
 ];
+
+const FIELD =
+  "min-h-[44px] w-full rounded-btn border border-border-strong bg-panel-sunk px-3 text-[13px] text-text placeholder:text-text-muted";
 
 /**
  * Assertion concepts the data paths would pull in as features but the label
@@ -69,8 +74,7 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
 
   const stray = strayAssertions(concepts, dataPaths, labelPaths);
 
-  const canSubmit =
-    missing.length === 0 && !apostrophe && stray.length === 0 && !busy;
+  const canSubmit = missing.length === 0 && !apostrophe && stray.length === 0 && !busy;
 
   async function submit() {
     const hyper = buildOverrides(modelType, hyperFields, hyperValues);
@@ -107,73 +111,75 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <div>
-          <label className="mb-1 block text-xs text-neutral-500">code</label>
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-3">
+        <div className="w-52">
+          <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="model-code">
+            code
+          </label>
           <input
+            id="model-code"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="my_model"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm"
+            className={`${FIELD} font-mono`}
           />
         </div>
         <div className="min-w-0 flex-1">
-          <label className="mb-1 block text-xs text-neutral-500">
+          <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="model-desc">
             description
           </label>
           <input
+            id="model-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What this model predicts"
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm"
+            className={FIELD}
           />
         </div>
       </div>
 
-      {path && <p className="text-xs text-neutral-500">path: {path}</p>}
-
-      {apostrophe && (
-        <p className="text-xs text-red-400">
-          no apostrophes — the blob is stored single-quoted and repaired before
-          parsing, so one apostrophe corrupts the whole config
+      {path && (
+        <p className="text-[12px] text-text-muted">
+          path: <Mono className="text-text-3">{path}</Mono>
         </p>
       )}
 
+      {apostrophe && (
+        <Callout tone="danger" title="no apostrophes">
+          The blob is stored single-quoted and repaired before parsing, so one
+          apostrophe corrupts the whole config.
+        </Callout>
+      )}
+
       <div>
-        <label className="mb-1 block text-xs text-neutral-500">
+        <p className="mb-1.5 text-[12px] text-text-3" id="positive-label">
           positive cohorts
-        </label>
-        <CohortMultiPicker
-          cohorts={cohorts}
-          values={positive}
-          onChange={setPositive}
-        />
+        </p>
+        <CohortMultiPicker cohorts={cohorts} values={positive} onChange={setPositive} />
       </div>
       <div>
-        <label className="mb-1 block text-xs text-neutral-500">
+        <p className="mb-1.5 text-[12px] text-text-3" id="negative-label">
           negative cohorts
-        </label>
-        <CohortMultiPicker
-          cohorts={cohorts}
-          values={negative}
-          onChange={setNegative}
-        />
+        </p>
+        <CohortMultiPicker cohorts={cohorts} values={negative} onChange={setNegative} />
       </div>
 
       {overlap.length > 0 && (
-        <Warning>
-          {overlap.join(", ")} is in both classes. Patients in both are dropped
-          from <em>both</em>, not assigned to one.
-        </Warning>
+        <Callout tone="warn" title="cohort in both classes">
+          <Mono className="text-text-2">{overlap.join(", ")}</Mono> is in both
+          classes. Patients in both are dropped from <em>both</em>, not assigned
+          to one.
+        </Callout>
       )}
 
-      <div className="space-y-3 border-t border-neutral-800 pt-4">
-        <p className="text-xs text-neutral-500">
+      <div className="space-y-4 border-t border-border-soft pt-5">
+        <p className="text-[12px] leading-relaxed text-text-muted">
           Each selection is a prefix match over your loaded concepts — pick the
           subtree, not individual columns.
         </p>
         <PathPicker
+          id="data-paths-label"
           label="data paths (features)"
           tree={tree}
           values={dataPaths}
@@ -181,6 +187,7 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
           hint="The model's inputs. Usually one folder, e.g. /YourData/features"
         />
         <PathPicker
+          id="label-paths-label"
           label="label paths"
           tree={tree}
           values={labelPaths}
@@ -189,10 +196,8 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
         />
 
         {stray.length > 0 && (
-          <Warning>
-            <strong className="text-neutral-200">
-              {stray.join(", ")}
-            </strong>{" "}
+          <Callout tone="warn" title="outcome concept fed in as a feature">
+            <Mono className="text-text-2">{stray.join(", ")}</Mono>{" "}
             {stray.length === 1 ? "is an outcome concept" : "are outcome concepts"}{" "}
             your data paths would feed in as{" "}
             {stray.length === 1 ? "a feature" : "features"}. Assertions carry no
@@ -200,11 +205,11 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
             that names neither the concept nor the path. Either narrow the data
             paths, or add {stray.length === 1 ? "its" : "their"} folder to the
             label paths.
-          </Warning>
+          </Callout>
         )}
       </div>
 
-      <div className="space-y-3 border-t border-neutral-800 pt-4">
+      <div className="space-y-3 border-t border-border-soft pt-5">
         <ModelTypePicker
           value={modelType}
           onChange={(key, fields) => {
@@ -216,7 +221,7 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
           onValuesChange={setHyperValues}
         />
         {hyperErrors.length > 0 && (
-          <ul className="space-y-0.5 text-xs text-red-400">
+          <ul className="space-y-1 text-[12px] text-danger">
             {hyperErrors.map((e) => (
               <li key={e}>{e}</li>
             ))}
@@ -225,27 +230,23 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
       </div>
 
       <div>
-        <button
-          onClick={() => setAdvanced((a) => !a)}
-          className="text-xs text-neutral-500 hover:text-neutral-300"
-        >
+        <Button variant="quiet" className="px-0" onClick={() => setAdvanced((a) => !a)}>
           {advanced ? "hide" : "show"} advanced
-        </button>
+        </Button>
         {advanced && (
           <div className="mt-2 flex flex-wrap gap-3">
             {ADVANCED.map(([key]) => (
               <div key={key}>
-                <label className="mb-1 block text-xs text-neutral-500">
-                  {key}
+                <label className="mb-1.5 block text-[12px] text-text-3" htmlFor={`adv-${key}`}>
+                  <Mono>{key}</Mono>
                 </label>
                 <input
+                  id={`adv-${key}`}
                   type="number"
                   step="any"
                   value={opts[key]}
-                  onChange={(e) =>
-                    setOpts({ ...opts, [key]: Number(e.target.value) })
-                  }
-                  className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                  onChange={(e) => setOpts({ ...opts, [key]: Number(e.target.value) })}
+                  className={`${FIELD} w-40 font-mono tabular-nums`}
                 />
               </div>
             ))}
@@ -253,27 +254,27 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
         )}
       </div>
 
-      <div className="space-y-1">
-        <button
-          onClick={submit}
-          disabled={!canSubmit}
-          className="rounded bg-sky-800 px-3 py-1.5 text-sm text-sky-50 hover:bg-sky-700 disabled:opacity-40"
-        >
+      <div className="space-y-2">
+        <Button variant="primary" onClick={submit} disabled={!canSubmit}>
           {busy ? "saving…" : "Save model config"}
-        </button>
+        </Button>
         {missing.length > 0 && (
-          <p className="text-xs text-amber-300/80">
-            Still needed: {missing.join(", ")}. Nothing is saved — and step 4
-            only lists models that have been.
+          <p className="text-[12px] text-warn">
+            Still needed: {missing.join(", ")}. Nothing is saved — and the train
+            step only lists models that have been.
           </p>
         )}
       </div>
 
-      <Warnings items={warnings} />
+      {warnings.map((w) => (
+        <Callout key={w} tone="warn" title="saved, with a caveat">
+          {w}
+        </Callout>
+      ))}
       {error && (
-        <p className="rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">
+        <Callout tone="danger" title="save rejected">
           {error}
-        </p>
+        </Callout>
       )}
     </div>
   );
