@@ -50,7 +50,7 @@ export default function PipelineRail({ steps, selected, onSelect, project }) {
           */}
           <span
             aria-hidden="true"
-            className="absolute top-4 bottom-4 left-[19px] w-px bg-border"
+            className="absolute top-4 bottom-4 left-[21px] w-px bg-border"
           />
 
           {steps.map((step) => {
@@ -61,8 +61,13 @@ export default function PipelineRail({ steps, selected, onSelect, project }) {
                   type="button"
                   onClick={() => onSelect(step.n)}
                   aria-current={active ? "step" : undefined}
-                  className={`flex w-full items-start gap-3 rounded-row py-2.5 pr-2 pl-2 text-left transition-colors ${
-                    active ? "bg-panel-sunk" : "hover:bg-panel-sunk/60"
+                  // Same accent bar as the Overview item above: on a rail
+                  // where every row already carries a coloured circle, a
+                  // background tint alone was not a legible selection.
+                  className={`flex w-full items-start gap-3 rounded-row border-l-2 py-2.5 pr-2 pl-2 text-left transition-colors ${
+                    active
+                      ? "border-accent bg-panel-sunk"
+                      : "border-transparent hover:bg-panel-sunk/60"
                   }`}
                 >
                   <StepCircle state={step.state} n={step.n} />
