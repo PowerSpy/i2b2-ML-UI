@@ -247,6 +247,7 @@ export default function App() {
           <ModelForm
             cohorts={cohorts}
             tree={tree}
+            concepts={concepts}
             onCreated={(code) => {
               setSelectedModel(code);
               bump();

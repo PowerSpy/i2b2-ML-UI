@@ -96,6 +96,50 @@ def _blob_field(column: str, field: str) -> str:
     )
 
 
+def _prefix_clause(column: str, paths: list[str]) -> str:
+    """OR of prefix matches, mirroring how the build engine resolves paths."""
+    parts = []
+    for p in paths:
+        check_path(p)
+        like = p.strip("/").replace("/", "\\\\")
+        parts.append(f"{column} LIKE '\\\\{like}\\\\%'")
+    return " OR ".join(parts)
+
+
+def assertion_features(data_paths: list[str], label_paths: list[str]) -> list[str]:
+    """Assertion concepts that would be fed in as model features.
+
+    The build engine resolves both path sets to concept codes and subtracts the
+    label codes from the data codes (build_model_ML_helper.create_data_label_codes),
+    so data paths that fully contain the label subtree are harmless. What is not
+    harmless is a data path that pulls in an assertion the label paths do not
+    cover: assertions carry no numeric value, so the column arrives empty and
+    the run dies deep inside the pipeline with "The target y needs to have more
+    than 1 class" - which names neither the concept nor the path that caused it.
+
+    Returns the offending codes so the caller can say which ones.
+    """
+    if not data_paths:
+        return []
+
+    data_clause = _prefix_clause("concept_path", data_paths)
+    sql = (
+        "SELECT concept_cd "
+        f"FROM {settings.db_schema}.concept_dimension "
+        f"WHERE ({data_clause}) AND concept_type = 'assertion'"
+    )
+    if label_paths:
+        label_clause = _prefix_clause("concept_path", label_paths)
+        sql += (
+            " AND concept_cd NOT IN ("
+            "SELECT concept_cd "
+            f"FROM {settings.db_schema}.concept_dimension "
+            f"WHERE {label_clause})"
+        )
+    rows = query(sql + " ORDER BY concept_cd;")
+    return [r["concept_cd"] for r in rows]
+
+
 def has_config_at_path(path: str) -> bool:
     check_path(path)
     like = path.strip("/").replace("/", "\\\\")

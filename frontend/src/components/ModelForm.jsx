@@ -14,8 +14,28 @@ const ADVANCED = [
   ["random_seed", 0.42],
 ];
 
+/**
+ * Assertion concepts the data paths would pull in as features but the label
+ * paths do not claim.
+ *
+ * Mirrors the check the backend enforces at save time, so the problem shows up
+ * while the paths are being picked rather than on submit. The backend remains
+ * authoritative — this is only here to shorten the feedback loop.
+ */
+function strayAssertions(concepts, dataPaths, labelPaths) {
+  if (!dataPaths.length) return [];
+  const under = (paths) => (c) =>
+    paths.some((p) => c.path === p || c.path.startsWith(`${p}/`));
+
+  return concepts
+    .filter((c) => c.type === "assertion")
+    .filter(under(dataPaths))
+    .filter((c) => !under(labelPaths)(c))
+    .map((c) => c.code);
+}
+
 /** A "model" is a concept whose blob holds the config. Defining one trains nothing. */
-export default function ModelForm({ cohorts, tree, onCreated }) {
+export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
   const [positive, setPositive] = useState([]);
@@ -47,7 +67,10 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
     !dataPaths.length && "at least one data path",
   ].filter(Boolean);
 
-  const canSubmit = missing.length === 0 && !apostrophe && !busy;
+  const stray = strayAssertions(concepts, dataPaths, labelPaths);
+
+  const canSubmit =
+    missing.length === 0 && !apostrophe && stray.length === 0 && !busy;
 
   async function submit() {
     const hyper = buildOverrides(modelType, hyperFields, hyperValues);
@@ -162,8 +185,23 @@ export default function ModelForm({ cohorts, tree, onCreated }) {
           tree={tree}
           values={labelPaths}
           onChange={setLabelPaths}
-          hint="Where the outcome lives, e.g. /YourData/label — must not overlap the data paths"
+          hint="Where the outcome lives, e.g. /YourData/label. A data path may contain it, as long as the label paths claim every outcome concept inside."
         />
+
+        {stray.length > 0 && (
+          <Warning>
+            <strong className="text-neutral-200">
+              {stray.join(", ")}
+            </strong>{" "}
+            {stray.length === 1 ? "is an outcome concept" : "are outcome concepts"}{" "}
+            your data paths would feed in as{" "}
+            {stray.length === 1 ? "a feature" : "features"}. Assertions carry no
+            value, so the build runs for a while and then fails with an error
+            that names neither the concept nor the path. Either narrow the data
+            paths, or add {stray.length === 1 ? "its" : "their"} folder to the
+            label paths.
+          </Warning>
+        )}
       </div>
 
       <div className="space-y-3 border-t border-neutral-800 pt-4">

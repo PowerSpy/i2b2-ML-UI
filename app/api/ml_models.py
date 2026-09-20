@@ -161,6 +161,20 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     if unknown:
         raise HTTPException(400, f"unknown cohort(s): {', '.join(unknown)}")
 
+    # Catch the misconfiguration that otherwise surfaces only after a full
+    # training run, as "All the N fits failed ... The target y needs to have
+    # more than 1 class" from inside imblearn - a message that names neither
+    # the concept nor the path responsible.
+    stray = ml_blob.assertion_features(body.blob.data_paths, body.blob.label_paths)
+    if stray:
+        raise HTTPException(
+            400,
+            f"data paths pull in assertion concept(s) {', '.join(stray)} as features. "
+            "Assertions carry no value, so the build fails partway through with an "
+            "unrelated-looking error. Either narrow the data paths, or widen the "
+            "label paths to cover them.",
+        )
+
     warnings = []
     overlap = sorted(set(body.blob.positive_patient_set) & set(body.blob.negative_patient_set))
     if overlap:
