@@ -24,6 +24,30 @@ class Job_Out(BaseModel):
     queued: bool
     message: str
     warnings: list[str] = []
+    # The row this submission created. None when it could not be identified,
+    # which the caller must treat as "unknown", never as "the newest job".
+    job_id: int | None = None
+
+
+def _max_job_id() -> int:
+    return int(db.scalar(f"SELECT COALESCE(MAX(id), 0) FROM {settings.db_schema}.job;") or 0)
+
+
+def _job_created_after(previous_max: int) -> int | None:
+    """The job this submission created, identified by id rather than recency.
+
+    The ETL's queue response carries no id, and reading "the newest row" after
+    submitting is a race: the row may not exist yet, in which case the newest
+    row is the *previous* job — often already COMPLETED, so the UI reports
+    instant success for a build that never ran. Anchoring to the id seen before
+    submitting makes that impossible; an unfinished insert yields None, which is
+    honest, instead of someone else's job.
+    """
+    rows = db.query(
+        f"SELECT id FROM {settings.db_schema}.job "
+        f"WHERE id > {int(previous_max)} ORDER BY id ASC LIMIT 1;"
+    )
+    return int(rows[0]["id"]) if rows else None
 
 
 class Job(BaseModel):
@@ -63,11 +87,13 @@ def build(body: Build_In) -> Job_Out:
             "(Folders in the concept tree are not models.)",
         )
 
+    before = _max_job_id()
     res = etl_api.post("/etl/job", json={
         "input": {"path": body.path},
         "jobType": "ml",
     })
-    return Job_Out(queued=True, message=str(res), warnings=[_wipe_warning(body.path)])
+    return Job_Out(queued=True, message=str(res), job_id=_job_created_after(before),
+                   warnings=[_wipe_warning(body.path)])
 
 
 @router.post("/jobs/apply", response_model=Job_Out)
@@ -88,6 +114,7 @@ def apply(body: Apply_In) -> Job_Out:
             "(build_model_ML_helper.py:173)",
         )
 
+    before = _max_job_id()
     res = etl_api.post("/etl/job", json={
         "input": {
             "path": body.path,
@@ -96,7 +123,8 @@ def apply(body: Apply_In) -> Job_Out:
         },
         "jobType": "ml",
     })
-    return Job_Out(queued=True, message=str(res), warnings=[_wipe_warning(body.path)])
+    return Job_Out(queued=True, message=str(res), job_id=_job_created_after(before),
+                   warnings=[_wipe_warning(body.path)])
 
 
 @router.get("/jobs", response_model=list[Job])

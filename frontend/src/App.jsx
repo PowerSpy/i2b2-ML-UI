@@ -247,6 +247,7 @@ export default function App() {
           <ModelForm
             cohorts={cohorts}
             tree={tree}
+            concepts={concepts}
             onCreated={(code) => {
               setSelectedModel(code);
               bump();
@@ -328,7 +329,11 @@ export default function App() {
           blocked={
             !model?.is_built
               ? "Build a model first — applying an untrained one fails inside the job."
-              : null
+              : model.features_present === false
+                ? "This model is trained, but none of the features it learned from " +
+                  "still have facts — the data was deleted or reloaded since. " +
+                  "Every prediction would come from zero-filled columns. Rebuild it first."
+                : null
           }
           help={
             <>
@@ -414,12 +419,31 @@ export default function App() {
               target="concepts"
               onDeleted={bump}
             />
+            {models.length > 0 && (
+              <p className="text-xs text-red-300">
+                Models are concepts, so wiping concepts also destroys{" "}
+                <strong>
+                  all {models.length} model{models.length === 1 ? "" : "s"}
+                </strong>{" "}
+                — config and trained weights both
+                {models.some((m) => m.is_built)
+                  ? `, including ${models.filter((m) => m.is_built).length} already built`
+                  : ""}
+                . There is no history and no undo.
+              </p>
+            )}
             <DeleteButton
               endpoint="/delete-facts"
               label="wipe all facts"
               target="facts"
               onDeleted={bump}
             />
+            <p className="text-xs text-neutral-500">
+              Wiping facts leaves models in place but strands them: they stay
+              marked built while the data they learned from is gone. They show
+              as <span className="text-red-300">DATA GONE</span> in step 4
+              afterwards.
+            </p>
             <p className="text-xs text-neutral-500">
               Cohorts survive both, and are wiped from step 2.
             </p>
@@ -443,6 +467,7 @@ function ModelPicker({ models, value, onChange }) {
           {m.code}
           {m.model_type ? ` [${m.model_type}]` : ""} — {m.description ?? m.path}
           {m.is_built ? " (built)" : ""}
+          {m.is_built && m.features_present === false ? " — DATA GONE" : ""}
         </option>
       ))}
     </select>

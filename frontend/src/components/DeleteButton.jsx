@@ -10,15 +10,15 @@ export default function DeleteButton({ endpoint, label, target, onDeleted }) {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [status, setStatus] = useState(null);
+  const [result, setResult] = useState(null);
 
   async function run() {
     setBusy(true);
     setError(null);
-    setStatus(null);
+    setResult(null);
     try {
       const res = await apiDelete(endpoint);
-      setStatus(res.status);
+      setResult(res);
       if (res.status === "ok") onDeleted?.();
     } catch (e) {
       setError(e.message);
@@ -61,10 +61,27 @@ export default function DeleteButton({ endpoint, label, target, onDeleted }) {
         {label}
       </button>
       {error && <span className="text-red-400">{error}</span>}
-      {status && status !== "ok" && (
-        <span className="text-red-400">delete failed — check backend logs</span>
+      {result && result.status !== "ok" && (
+        <span className="text-red-400">
+          delete failed
+          {/* The CLI's own output, which the endpoint used to discard before
+              telling the user to go and read it. */}
+          {(result.stderr || result.stdout) && (
+            <pre className="mt-1 max-h-40 overflow-auto rounded bg-neutral-900 p-2 whitespace-pre-wrap text-red-300">
+              {(result.stderr || result.stdout).slice(-1500)}
+            </pre>
+          )}
+        </span>
       )}
-      {status === "ok" && <span className="text-emerald-400">deleted</span>}
+      {result?.status === "ok" && (
+        <span className="text-emerald-400">
+          {result.rows_removed == null
+            ? "deleted"
+            : `${result.rows_removed.toLocaleString()} row${
+                result.rows_removed === 1 ? "" : "s"
+              } deleted`}
+        </span>
+      )}
     </span>
   );
 }

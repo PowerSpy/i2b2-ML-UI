@@ -26,10 +26,26 @@ def list_concepts() -> list[Concept]:
             for r in rows]
 
 @router.get("/concept-tree", response_model=list[str])
-def concept_tree() -> list[str]:
+def concept_tree(include_models: bool = False) -> list[str]:
+    """Selectable path prefixes, for the feature and label pickers.
+
+    The ml_root subtree is left out by default. Models are stored there as
+    concepts, so it shows up as an ordinary branch and can be picked as a
+    feature source — which feeds serialized model blobs in as features. The
+    app's help text says not to; this makes it impossible rather than
+    discouraged. Pass include_models=true to get the raw tree.
+    """
+    ml_root = settings.ml_root.rstrip("/")
+
     prefixes = set()
     for c in list_concepts():
         parts = c.path.strip("/").split("/")
         for i in range(1, len(parts)):
             prefixes.add("/" + "/".join(parts[:i]))
+
+    if not include_models:
+        prefixes = {
+            p for p in prefixes
+            if p != ml_root and not p.startswith(f"{ml_root}/")
+        }
     return sorted(prefixes)

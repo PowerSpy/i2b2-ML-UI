@@ -32,6 +32,36 @@ frontend (Vite, :5173)  ──/api──▶  FastAPI (:8003)  ──docker exec�
 - Node 18+
 - Docker, with the i2b2 stack running (`i2b2-etl` and `i2b2-pg` containers)
 
+## Before the app will work
+
+Three things live outside this repo's Python and JS, and none of them are
+optional. All are covered in [`docker-changes/README.md`](docker-changes/README.md).
+
+**1. Install the container-side code.** Model selection, diagnostic plots and
+the validation fixes live inside `i2b2-etl`. It has no bind mounts, so they sit
+in its writable layer: they survive `docker restart` and are lost on
+`docker rm`.
+
+```bash
+./docker-changes/apply.sh
+```
+
+**2. Publish the ETL API.** The container exposes port 5000 and publishes
+nothing, so the backend cannot reach it. A socat sidecar bridges it:
+
+```bash
+docker run -d --name i2b2-etl-proxy --network i2b2-net \
+  --restart unless-stopped -p 5001:5000 \
+  alpine/socat TCP-LISTEN:5000,fork,reuseaddr TCP:i2b2-etl:5000
+```
+
+**3. Issue yourself a session id.** Authentication is not password-based — see
+the comment in `config.template.yaml`. Copy that file to `config.yaml` (it is
+gitignored) and fill in the session id.
+
+Sanity check once all three are done: `GET /api/ml-model-types` should list nine
+algorithms. If it 503s, step 1 did not take.
+
 The backend runs on the **host**, not in a container — it needs the `docker` CLI
 on its PATH and permission to exec into the i2b2 containers.
 
@@ -82,8 +112,16 @@ database container itself.
 | `POST` | `/api/load-concepts` | Upload a concepts CSV |
 | `POST` | `/api/load-facts` | Upload a facts CSV (`?mrn_are_patient_numbers=`) |
 | `GET` | `/api/verify-load` | Row counts for concepts and facts |
-| `DELETE` | `/api/delete-concepts` | Delete all concepts |
+| `DELETE` | `/api/delete-concepts` | Delete all concepts (**and every model**) |
 | `DELETE` | `/api/delete-facts` | Delete all facts |
+| `GET` | `/api/concepts`, `/api/concept-tree` | Concept list and selectable path prefixes |
+| `GET`/`POST`/`DELETE` | `/api/cohorts` | Patient sets, with live size and duplicate-name flags |
+| `GET` | `/api/ml-model-types` | Algorithms the container's registry can build |
+| `GET`/`POST` | `/api/ml-concepts` | Model configs |
+| `GET` | `/api/ml-concepts/{code}/config\|metrics\|plots` | Stored config, metrics, diagnostic plots |
+| `POST` | `/api/jobs/build`, `/api/jobs/apply` | Queue a job; returns its id |
+| `GET` | `/api/jobs` | Recent job rows |
+| `GET`/`POST` | `/api/watcher`, `/api/watcher/start`, `/api/watcher/log` | Job watcher state |
 
 Interactive docs at `http://127.0.0.1:8003/docs`.
 

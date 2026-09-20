@@ -90,6 +90,11 @@ class Ml_Concept(BaseModel):
     # The estimator class actually fitted, recorded at build time. Only set on
     # models built since the registry patch; older ones report None.
     clf_type: str | None = None
+    # Whether the features this model was trained on still have facts. None when
+    # unknown (not built, or built before feature codes were recorded). False
+    # means the model is trained but its data is gone — applying it scores every
+    # patient off zero-filled columns.
+    features_present: bool | None = None
 
 
 class Model_Field(BaseModel):
@@ -154,12 +159,43 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     if "'" in body.description:
         raise HTTPException(400, "description cannot contain an apostrophe")
 
-    known = {c["name"] for c in cohorts.list_cohorts()}
-    unknown = sorted(
-        set(body.blob.positive_patient_set + body.blob.negative_patient_set) - known
-    )
+    all_cohorts = cohorts.list_cohorts()
+    referenced = set(body.blob.positive_patient_set + body.blob.negative_patient_set)
+
+    unknown = sorted(referenced - {c["name"] for c in all_cohorts})
     if unknown:
         raise HTTPException(400, f"unknown cohort(s): {', '.join(unknown)}")
+
+    # The engine resolves a cohort name to every result_instance_id that carries
+    # it and unions them, so an ambiguous name does not pick one set - it trains
+    # on all of them at once, silently.
+    ambiguous = sorted(referenced & {c["name"] for c in all_cohorts if c["duplicate"]})
+    if ambiguous:
+        raise HTTPException(
+            400,
+            f"cohort name(s) {', '.join(ambiguous)} refer to more than one patient set. "
+            "Training resolves a name to every matching set and unions them, so the "
+            "model would be trained on a population you did not choose. Delete the "
+            "duplicates in step 2, keeping the one you want.",
+        )
+
+    stale = sorted(
+        c["name"] for c in all_cohorts if c["name"] in referenced and c["stale"]
+    )
+
+    # Catch the misconfiguration that otherwise surfaces only after a full
+    # training run, as "All the N fits failed ... The target y needs to have
+    # more than 1 class" from inside imblearn - a message that names neither
+    # the concept nor the path responsible.
+    stray = ml_blob.assertion_features(body.blob.data_paths, body.blob.label_paths)
+    if stray:
+        raise HTTPException(
+            400,
+            f"data paths pull in assertion concept(s) {', '.join(stray)} as features. "
+            "Assertions carry no value, so the build fails partway through with an "
+            "unrelated-looking error. Either narrow the data paths, or widen the "
+            "label paths to cover them.",
+        )
 
     warnings = []
     overlap = sorted(set(body.blob.positive_patient_set) & set(body.blob.negative_patient_set))
@@ -167,6 +203,11 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
         warnings.append(
             f"cohort(s) {', '.join(overlap)} are in both classes; patients in both are "
             "dropped from both, not assigned to one"
+        )
+    if stale:
+        warnings.append(
+            f"cohort(s) {', '.join(stale)} contain patients that no longer have facts; "
+            "the model will train on fewer patients than the cohort size suggests"
         )
     if ml_blob.is_built(body.code):
         warnings.append("this replaces the existing trained model — no history is kept")
@@ -196,7 +237,7 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
 @router.get("/ml-concepts/{code}/config")
 def ml_concept_config(code: str) -> dict:
     try:
-        return ml_blob.strip_heavy(ml_blob.load_blob(code))
+        return ml_blob.load_blob_light(code)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
@@ -206,13 +247,17 @@ def ml_concept_config(code: str) -> dict:
 @router.get("/ml-concepts/{code}/metrics", response_model=Metrics)
 def metrics(code: str) -> Metrics:
     try:
-        blob = ml_blob.load_blob(code)
+        # Trimmed: the metrics are ~1 KB of a blob that reaches 600 KB once the
+        # serialized model and plot images are in it.
+        blob = ml_blob.load_blob_light(code)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if "serialized_model" not in blob:
+    # serialized_model is one of the keys stripped above, so built-ness is
+    # asked of the database rather than inferred from what came back.
+    if not ml_blob.is_built(code):
         raise HTTPException(409, "model has not been built yet")
 
     def pick(keys):

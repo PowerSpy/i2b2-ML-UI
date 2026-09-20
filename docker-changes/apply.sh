@@ -12,6 +12,7 @@ set -euo pipefail
 
 CONTAINER="${CONTAINER:-i2b2-etl}"
 ML_DIR="/usr/src/app/i2b2_cdi/ML"
+FACT_DIR="/usr/src/app/i2b2_cdi/fact"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> target container: $CONTAINER"
@@ -19,18 +20,23 @@ docker inspect "$CONTAINER" >/dev/null
 
 # Keep a pristine copy inside the container the first time only, so a second
 # run cannot overwrite the original with an already-patched file.
-echo "==> backing up the stock builder (first run only)"
+echo "==> backing up the stock files (first run only)"
 docker exec "$CONTAINER" bash -lc \
   "cd $ML_DIR && [ -f apply_build_model_ml.py.orig ] || cp apply_build_model_ml.py apply_build_model_ml.py.orig"
+docker exec "$CONTAINER" bash -lc \
+  "cd $FACT_DIR && [ -f fact_validation_helper.py.orig ] || cp fact_validation_helper.py fact_validation_helper.py.orig"
 
 echo "==> copying files in"
 for f in apply_build_model_ml.py model_registry.py model_plots.py; do
     docker cp "$HERE/i2b2_cdi/ML/$f" "$CONTAINER:$ML_DIR/$f"
-    echo "    $f"
+    echo "    ML/$f"
 done
+docker cp "$HERE/i2b2_cdi/fact/fact_validation_helper.py" \
+          "$CONTAINER:$FACT_DIR/fact_validation_helper.py"
+echo "    fact/fact_validation_helper.py"
 
 # Stale .pyc files shadow the new source until something invalidates them.
-docker exec "$CONTAINER" bash -lc "rm -rf $ML_DIR/__pycache__"
+docker exec "$CONTAINER" bash -lc "rm -rf $ML_DIR/__pycache__ $FACT_DIR/__pycache__"
 
 echo "==> restarting $CONTAINER"
 docker restart "$CONTAINER" >/dev/null
@@ -46,6 +52,14 @@ docker exec "$CONTAINER" bash -lc "cd /usr/src/app && .venv/bin/python -c '
 from i2b2_cdi.ML.model_registry import MODEL_REGISTRY
 from i2b2_cdi.ML.model_plots import generate_plots
 print(\"registry:\", list(MODEL_REGISTRY.keys()))
+'"
+
+# Worth its own check: a syntax error here takes down fact loading entirely,
+# and the upstream patch this file derives from shipped exactly that.
+echo "==> verifying the fact validator imports"
+docker exec "$CONTAINER" bash -lc "cd /usr/src/app && .venv/bin/python -c '
+from i2b2_cdi.fact.fact_validation_helper import validate_fact_row
+print(\"fact validator: ok\")
 '"
 
 echo "==> verifying the builder is wired to the registry"

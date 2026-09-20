@@ -1,0 +1,38 @@
+--- /tmp/fvh.orig	2026-09-19 22:38:18.244031100 -0500
++++ docker-changes/i2b2_cdi/fact/fact_validation_helper.py	2026-09-19 22:30:50.000000000 -0500
+@@ -74,13 +74,22 @@
+     
+     ctype = code_type_lookup.get(row['code'])
+ 
++    # Known tokens that represent a genuinely missing value, not invalid data.
++    # The row is still skipped either way - this only changes how it's
++    # categorized in the validation report (missing vs. invalid).
++    MISSING_VALUE_TOKENS = {'?', 'na', 'n/a', 'null', 'none', ''}
++
+     if ctype=='integer':
++        if str(row["value"]).strip().lower() in MISSING_VALUE_TOKENS:
++            return "Missing value for "+ row["code"] +" (skipped, not loaded)"
+         try:
+             value = int(row["value"])
+         except Exception as e:
+             return "Invalid value for "+ row["code"] +" Code of type "+ ctype.capitalize()
+ 
+     if ctype=='float':
++        if str(row["value"]).strip().lower() in MISSING_VALUE_TOKENS:
++            return "Missing value for "+ row["code"] +" (skipped, not loaded)"
+         try:
+             value = float(row["value"])
+         except Exception as e:
+@@ -90,7 +99,11 @@
+     if (ctype=="assertion"):
+         if type(row["value"]) is str:
+             if len(row["value"]) !=0:
+-                return "Invalid value for "+ row["code"] +" Code of type "+ ctype.capitalize() +". Value of Assertion should be blank."
++                # Auto-correct rather than reject: assertion facts represent
++                # presence/absence only and don't carry a meaningful value.
++                # A non-blank value here is a formatting mistake, not invalid
++                # data - blank it and let the fact load normally.
++                row["value"] = ""
+         
+     if (ctype=="string"):
+         if type(row["value"]) is str:

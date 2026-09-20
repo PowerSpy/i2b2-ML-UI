@@ -13,10 +13,27 @@ db_user: i2b2
 db_name: i2b2
 db_schema: i2b2demodata
 
+# Reaches the ETL through the socat sidecar; the container publishes no ports
+# of its own. See docker-changes/README.md.
 etl_url: http://127.0.0.1:5001
 etl_project: Demo
-etl_user: 'demo\demo'
-etl_password: 'Etl@2021'
+
+# NOT an account password. The ETL does not check pm_user_data - it looks for a
+# live row in i2b2pm.pm_user_session and only falls back to the i2b2 PM SOAP
+# service when it finds none. That service lives in i2b2-wildfly, so without it
+# running every correct password returns 401.
+#
+# Issue yourself a session id and put it below:
+#
+#   INSERT INTO i2b2pm.pm_user_session
+#     (user_id, session_id, entry_date, expired_date, change_date,
+#      changeby_char, status_cd)
+#   VALUES ('demo', '<20-char id>', CURRENT_TIMESTAMP - INTERVAL '1 hour',
+#           CURRENT_TIMESTAMP + INTERVAL '365 days', CURRENT_TIMESTAMP,
+#           'i2b2-ml-ui', 'A');
+#
+etl_user: 'Demo\demo'
+etl_password: '<session id from pm_user_session>'
 
 etl_app_dir: /usr/src/app
 etl_venv: /usr/src/app/.venv/bin/activate
