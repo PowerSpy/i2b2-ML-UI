@@ -1,7 +1,20 @@
-import csv, io, re, shlex
+import csv, io, re, shlex, sys
 
 from app.core.config import settings
 from app.core.docker_exec import exec
+
+# csv caps a single field at 128 KB by default, and a built model's blob blows
+# straight past that: the serialized model plus five base64 plot PNGs runs to
+# several hundred KB in one concept_blob cell. Without this, reading one fails
+# with "field larger than field limit". sys.maxsize overflows the C long this
+# takes on Windows, so step down until one is accepted.
+_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_limit)
+        break
+    except OverflowError:
+        _limit //= 2
 
 SAFE_CODE = re.compile(r"^[A-Za-z0-9_:-]{1,50}$")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,80}$")

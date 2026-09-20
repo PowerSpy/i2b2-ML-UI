@@ -9,6 +9,7 @@ import JobRunner from "./components/JobRunner.jsx";
 import MetricsPanel from "./components/MetricsPanel.jsx";
 import ModelForm from "./components/ModelForm.jsx";
 import PathPicker from "./components/PathPicker.jsx";
+import PlotsPanel from "./components/PlotsPanel.jsx";
 import PredictionsPanel from "./components/PredictionsPanel.jsx";
 import StepCard from "./components/StepCard.jsx";
 import VerifyPanel from "./components/VerifyPanel.jsx";
@@ -228,8 +229,17 @@ export default function App() {
                 that is where models themselves live.
               </p>
               <p>
+                <strong className="text-neutral-300">Algorithm</strong> picks{" "}
+                <em>how</em> it learns. The list comes from the registry
+                installed in the ETL container, so it reflects what can really
+                be built. Leave a hyperparameter blank to search that model
+                &apos;s default range instead of pinning one value.
+              </p>
+              <p>
                 Re-saving with an existing code replaces that model&apos;s
-                trained weights with no history kept.
+                config and, once rebuilt, its trained weights — no history is
+                kept. Changing the algorithm this way takes effect on the next
+                build.
               </p>
             </>
           }
@@ -272,9 +282,15 @@ export default function App() {
                 query — the true cause is earlier.
               </p>
               <p>
-                Training uses a fixed pipeline (scaling, SMOTE, feature
-                selection, logistic regression with a grid search), so there are
-                no algorithm choices to make.
+                The pipeline around the model is fixed — scaling, SMOTE,
+                feature selection, then a grid search — but the classifier
+                itself is whichever one you chose in step 3.
+              </p>
+              <p>
+                The metrics below name the estimator class that was actually
+                fitted, not just the algorithm you asked for. Those should
+                agree; if they do not, the model registry is not wired through
+                and the numbers describe a different model than you think.
               </p>
             </>
           }
@@ -295,8 +311,9 @@ export default function App() {
                   onDone={bump}
                 />
                 {model.is_built && (
-                  <div className="border-t border-neutral-800 pt-4">
+                  <div className="space-y-4 border-t border-neutral-800 pt-4">
                     <MetricsPanel code={model.code} refreshKey={version} />
+                    <PlotsPanel code={model.code} refreshKey={version} />
                   </div>
                 )}
               </>
@@ -423,7 +440,8 @@ function ModelPicker({ models, value, onChange }) {
       <option value="">— pick a model —</option>
       {models.map((m) => (
         <option key={m.code} value={m.code}>
-          {m.code} — {m.description ?? m.path}
+          {m.code}
+          {m.model_type ? ` [${m.model_type}]` : ""} — {m.description ?? m.path}
           {m.is_built ? " (built)" : ""}
         </option>
       ))}

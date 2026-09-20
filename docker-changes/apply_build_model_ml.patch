@@ -1,0 +1,92 @@
+--- docker-changes/apply_build_model_ml.py.orig	2026-09-19 17:54:04.001260900 -0500
++++ docker-changes/i2b2_cdi/ML/apply_build_model_ml.py	2026-09-19 16:38:58.000000000 -0500
+@@ -183,21 +183,13 @@
+     X=data.drop(columns=['label'])
+     X= X.fillna(0)#.sample(frac=0.1, random_state=42).reset_index(drop=True)
+   
+-    # Logistic Regression
+-    lr_pipeline = make_pipeline(
+-        LogisticRegression(solver="saga", penalty="elasticnet", class_weight="balanced", max_iter=30000),
+-        LogisticRegression(solver="saga", penalty="l1", class_weight="balanced"),
+-    )
+-    lr_grid = {
+-        "selector__threshold": ["median"],
+-        "clf__C": [0.1, 1, 10],
+-        "clf__l1_ratio": [0.0, 0.5, 1.0]
+-    }
+-    
+-
+-    name="LogisticRegression"
+-    pipeline=lr_pipeline
+-    param_grid=lr_grid
++    # Classifier selectable via blob["model_type"]; defaults to logistic
++    # regression. See model_registry.py to add new models - no changes
++    # needed here when adding a model, just register it there.
++    from i2b2_cdi.ML.model_registry import build_model
++    model_type = blob.get("model_type", "logistic").lower()
++    hyperparameter_overrides = blob.get("hyperparameters", {})
++    pipeline, param_grid, name = build_model(model_type, hyperparameter_overrides)
+ 
+     if params['task']=='build':
+         X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=int(params['random_seed']*1000),test_size=params['test_size'])
+@@ -257,13 +249,57 @@
+ 
+         #>>>>>>>>>>>>>>>>>>>>>>>>
+         #params,metrics,prediction_pipeline,selected_features=run_model_and_log1(name="LogisticRegression", pipeline=lr_pipeline, param_grid=lr_grid,concept_name_dict=concept_name_dict,X=X,y=y,params=params)
++        # Record what actually trained, not a hardcoded label. The registry can
++        # fall back to logistic regression for an unknown model_type without
++        # erroring, so the requested key alone does not prove what was built -
++        # clf_type is read off the fitted estimator.
++        metrics['model_type']= model_type
++        metrics['model_name']= name
++        metrics['clf_type']= type(clf).__name__
++
+         scores=[]
+-        scores.append(["LogisticRegression",metrics['roc_auc']])
++        scores.append([name,metrics['roc_auc']])
+ 
+         # Summary
+         print("\n=== Best Test ROC-AUC per Model ===")
+-        for name, score in scores:
+-            print(f"{name:18s} → {score:.4f}")
++        # Loop variable deliberately not `name`: that would clobber the model
++        # name the plotting block below still needs.
++        for score_name, score in scores:
++            print(f"{score_name:18s} → {score:.4f}")
++
++        # --- diagnostic plots (confusion matrix, ROC, PR, calibration) --------
++        # Adds base64 PNG entries under "plot_*" keys, plus raw confusion matrix
++        # counts. These go into `metrics` rather than `blob`: only metrics is
++        # passed to save_model_in_concept_blob, so anything written to the local
++        # `blob` here is discarded when this function returns.
++        #
++        # Failures are logged and swallowed. The model is trained and scored by
++        # this point, and a plotting problem must not cost the caller that work.
++        try:
++            from i2b2_cdi.ML.model_plots import generate_plots, extract_feature_info
++
++            _feat_names, _feat_values = (None, None)
++            try:
++                _feat_names, _feat_values = extract_feature_info(
++                    prediction_pipeline, selected_features
++                )
++            except Exception as _feat_exc:
++                logger.warning("Feature importance unavailable: {}", _feat_exc)
++
++            metrics.update(
++                generate_plots(
++                    y_true=y_test,
++                    y_pred=y_pred,
++                    y_proba=y_proba,
++                    model_name=name,
++                    feature_names=_feat_names,
++                    importances=_feat_values,
++                )
++            )
++        except Exception as _plot_exc:
++            logger.warning("Diagnostic plot generation failed: {}", _plot_exc)
++        # --- end diagnostic plots --------------------------------------------
++
+         save_model_in_concept_blob(ml_code,params,metrics,selected_features,prediction_pipeline)
+         return 'saved model'
+     else:
