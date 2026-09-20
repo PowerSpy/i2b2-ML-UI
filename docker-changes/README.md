@@ -11,10 +11,13 @@ docker-changes/
 ├── apply.sh                        reinstall everything + verify
 ├── apply_build_model_ml.py.orig    the stock file, for reference
 ├── apply_build_model_ml.patch      what changed, as a unified diff
-└── i2b2_cdi/ML/                    mirrors the path inside the container
-    ├── apply_build_model_ml.py     patched
-    ├── model_registry.py           new — the nine model definitions
-    └── model_plots.py              new — diagnostic plot generation
+└── i2b2_cdi/                       mirrors the paths inside the container
+    ├── ML/
+    │   ├── apply_build_model_ml.py     patched
+    │   ├── model_registry.py           new — the nine model definitions
+    │   └── model_plots.py              new — diagnostic plot generation
+    └── fact/
+        └── fact_validation_helper.py   patched — see "Validation" below
 ```
 
 `model_registry.py` and `model_plots.py` are copied unchanged from
@@ -89,6 +92,42 @@ expose neither `coef_` nor `feature_importances_`.
 > while the headline metrics use the F1-optimal threshold. The two genuinely
 > disagree — on one verified build, 10 false positives versus 8. The API keeps
 > them in separate fields for this reason.
+
+## Validation (fact_validation_helper.py)
+
+Derived from the two `Dataset-CLeaning` patches in i2b2-ETL-ML-Models, with one
+correction. Measured on a six-row file: one valid number, three missing numbers
+(`?`, `NA`, blank), one non-blank assertion, one blank assertion. **Three rows
+loaded.**
+
+**`patch_auto_blank_assertions` works, after a fix.** A non-blank assertion
+value used to be rejected outright; it is now blanked and the fact loads. That
+is a real behaviour change and the reason to apply any of this.
+
+But the patch as shipped **does not run**. Its replacement block ends:
+
+```python
+                row["value"] = '''
+```
+
+The `''` the author meant to assign was swallowed by the closing `'''`
+delimiter, so it writes `row["value"] = ` with no right-hand side. That is a
+`SyntaxError`, and because it sits in a module imported at fact-load time, it
+takes down **all** fact loading — not just assertions. The copy here assigns
+`""` properly. `apply.sh` import-checks the module afterwards for this reason.
+
+**`patch_missing_value_handling` changes nothing functional.** Its own output
+says so: *"The row is still eliminated/skipped in both cases — only the message
+and categorization changes."* Confirmed — `?`, `NA` and blank numerics were all
+skipped both before and after. It relabels them as
+`Missing value (skipped, not loaded)` instead of `Invalid value`, which is worth
+having in the error report, but it is a diagnostics improvement, not a
+capability.
+
+**So: numeric gaps are still dropped.** A dataset with missing numbers will load
+fewer rows than it has, patched or not. Impute or drop them before upload. The
+loader now reports rows actually gained, so the shortfall is at least visible
+instead of being reported as success.
 
 ## Environment notes
 

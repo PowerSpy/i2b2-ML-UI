@@ -28,10 +28,13 @@ export default function JobRunner({
   const [warnings, setWarnings] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-  const { job, status, done, error: pollError } = useJobPoll(jobId);
+  const { job, status, done, error: pollError, gaveUp } = useJobPoll(jobId);
   const notified = useRef(null);
 
   useEffect(() => {
+    // Also on gaveUp: the button is disabled while a job is in flight, and
+    // without this a job we stopped watching would leave it disabled for good.
+    if (gaveUp) setBusy(false);
     if (!done) return;
     // Cleared here rather than when the POST returns. Submitting only queues the
     // job, so re-enabling the button then let a second click queue another one —
@@ -42,7 +45,7 @@ export default function JobRunner({
       notified.current = jobId;
       onDone?.();
     }
-  }, [done, status, jobId, onDone]);
+  }, [done, gaveUp, status, jobId, onDone]);
 
   async function submit() {
     setBusy(true);
@@ -92,7 +95,14 @@ export default function JobRunner({
             </span>
           </p>
 
-          {pollError && (
+          {gaveUp && (
+          <p className="text-xs text-amber-300/80">
+            stopped watching after 20 minutes — the job may still be running.
+            Check the job list, or the watcher log if it never left PENDING.
+          </p>
+        )}
+
+        {pollError && (
           <p className="text-xs text-amber-300/80">
             lost contact while watching this job ({pollError}) — the status
             above may be out of date. It is still queued; it has not failed.

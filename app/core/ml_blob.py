@@ -37,6 +37,39 @@ def load_blob(code: str) -> dict:
     return parsed
 
 
+def load_blob_light(code: str) -> dict:
+    """The blob without the payload that dwarfs it.
+
+    A built blob is mostly one serialized model and five base64 plot PNGs -
+    611 KB on a verified random forest, of which the metrics are 1.2 KB. Reading
+    that to show six numbers meant pulling the whole thing through `psql --csv`
+    over `docker exec` and discarding 99.8% of it in Python.
+
+    The trim happens in the database instead. Falls back to the full read when
+    the blob is not valid JSON, which is the case for a config that has been
+    registered but never built - those are small, so nothing is lost.
+    """
+    check_code(code)
+    strip = " - ".join(f"'{k}'" for k in HEAVY)
+    try:
+        raw = scalar(
+            "SELECT (concept_blob::jsonb "
+            f"  - {strip} "
+            "  - ARRAY(SELECT jsonb_object_keys(concept_blob::jsonb) "
+            f"          WHERE jsonb_object_keys LIKE '{PLOT_PREFIX}%'))::text "
+            f"FROM {settings.db_schema}.concept_dimension "
+            f"WHERE concept_cd = '{code}';"
+        )
+    except RuntimeError:
+        return strip_heavy(load_blob(code))
+
+    if raw is None:
+        raise KeyError(f"no concept with code {code!r}")
+    if not raw.strip():
+        return {}
+    return json.loads(raw)
+
+
 def exists(code: str) -> bool:
     check_code(code)
     hit = scalar(

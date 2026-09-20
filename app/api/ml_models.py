@@ -237,7 +237,7 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
 @router.get("/ml-concepts/{code}/config")
 def ml_concept_config(code: str) -> dict:
     try:
-        return ml_blob.strip_heavy(ml_blob.load_blob(code))
+        return ml_blob.load_blob_light(code)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
@@ -247,13 +247,17 @@ def ml_concept_config(code: str) -> dict:
 @router.get("/ml-concepts/{code}/metrics", response_model=Metrics)
 def metrics(code: str) -> Metrics:
     try:
-        blob = ml_blob.load_blob(code)
+        # Trimmed: the metrics are ~1 KB of a blob that reaches 600 KB once the
+        # serialized model and plot images are in it.
+        blob = ml_blob.load_blob_light(code)
     except KeyError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    if "serialized_model" not in blob:
+    # serialized_model is one of the keys stripped above, so built-ness is
+    # asked of the database rather than inferred from what came back.
+    if not ml_blob.is_built(code):
         raise HTTPException(409, "model has not been built yet")
 
     def pick(keys):
