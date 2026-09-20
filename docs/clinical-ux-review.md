@@ -8,10 +8,14 @@ Based on a full read of `app/` and `frontend/src/` plus live testing against a
 running `i2b2-etl` / `i2b2-pg` stack on 2026-09-19, including real model builds
 on both loaded datasets.
 
-**Scope note.** The `ml-models-additions` branch (model selection, hyperparameter
-choice, diagnostic plots, and the estimator-identity readout) is open but not
-merged. Items it already fixes are marked *(fixed on branch)*. Everything else
-is outstanding.
+**Scope note.** Model selection, hyperparameter choice, diagnostic plots and the
+estimator-identity readout landed in PR #1 and are on `main`. Items resolved
+since are marked *(fixed)*. Everything else is outstanding.
+
+**This document is corrected in place.** Findings were written from a code read
+plus live testing, and one of them (1.1) did not survive being tested properly.
+Corrections are marked with a dated note rather than quietly edited away, so the
+original claim and the evidence against it both stay visible.
 
 ---
 
@@ -32,25 +36,56 @@ around. A tool that is confidently wrong gets believed.
 
 ## 1. Where the UI can mislead — fix first
 
-### 1.1 Nothing prevents label leakage — Misleading
+### 1.1 Outcome concepts can become features — Friction *(fixed)*
 
-`ModelForm`'s label-path field carries the hint *"must not overlap the data
-paths"*. That rule is enforced nowhere: not in the form, not in `Blob_In`, not
-in the build engine. Select `/YourData` for both and the outcome becomes one of
-its own predictors.
+> **Corrected 2026-09-19.** This item was first published as *"Nothing prevents
+> label leakage — Misleading"*, claiming that overlapping data and label paths
+> silently produce a model with ROC-AUC near 1.0. **That does not happen**, and
+> the correction matters more than the original claim: the item was ranked the
+> most dangerous behaviour in the application on the strength of a leak that was
+> never verified. What follows is what testing actually showed.
 
-The result is a model with ROC-AUC near 1.0, which `MetricsPanel` renders in
-large green type as the headline number. Every diagnostic plot agrees, because
-the model genuinely does separate the training data perfectly. There is no
-surface anywhere that says *this is too good to be true*.
+The build engine resolves both path sets to concept codes and subtracts the
+label codes from the data codes
+(`build_model_ML_helper.create_data_label_codes`). Overlap is therefore already
+handled. Measured on the heart dataset:
 
-This is the single most dangerous behaviour in the application. A clinician
-comparing algorithms has no reason to distrust a 0.99 and every reason to
-report it.
+| data paths | label paths | result |
+| --- | --- | --- |
+| `/HeartDisease/HeartDisease_ehr1` | `/HeartDisease/label` | ROC-AUC 0.9301, 7 features |
+| `/HeartDisease` (contains the label subtree) | `/HeartDisease/label` | ROC-AUC 0.9301, same 7 features |
 
-**Fix:** reject overlapping prefixes at save time; warn loudly on any ROC-AUC
-above ~0.98; show which concept codes ended up as features next to the score
-(the metrics response already returns `feature_column_codes`).
+Identical. There is no leak to guard against.
+
+The real defect is narrower. When the data paths pull in an **assertion**
+concept that the label paths do *not* claim, that concept becomes a feature.
+Assertions carry no value, so the column arrives empty and the run dies deep
+inside the pipeline:
+
+```
+All the 45 fits failed ...
+ValueError: The target "y" needs to have more than 1 class. Got 1 class instead
+```
+
+That arrives after several minutes of training and names neither the concept
+nor the path responsible. Reproduced with `/HeartDisease` as data and
+`/HeartDisease/label/target` as label, which leaves `positive` and `negative` in
+the feature set. Empty `label_paths` does the same thing and was accepted.
+
+So the severity was wrong in both directions: it does not mislead, but it does
+waste a training run on an error nobody can act on.
+
+**Fixed** on `fix/stray-assertion-features`: save is refused immediately, naming
+the offending concepts, with the same rule mirrored in `ModelForm` so it appears
+while the paths are being picked. Disjoint paths and fully-covered label
+subtrees still save.
+
+**Still open:** there is no warning on a suspiciously high ROC-AUC. Leakage
+through a *numeric* feature that encodes the outcome — a derived risk score
+loaded as a float, say — remains undetectable by path rules, because the engine
+excludes by concept code and such a column is a legitimate feature as far as it
+can tell. A "this looks too good" flag above ~0.98, next to the feature list,
+would catch what path validation structurally cannot.
 
 ### 1.2 `/ML` can be chosen as a feature source — Misleading
 
@@ -275,9 +310,10 @@ instance. Worth addressing before data volume grows.
 
 ## Suggested order
 
-1. **Section 1** — the misleading behaviours, particularly leakage (1.1) and
-   the job race (1.4). Cheap to fix, and they are the ones that produce
-   confidently wrong answers.
+1. **Section 1** — the misleading behaviours, particularly the job race (1.4)
+   and the surviving "built" flag (1.3). Cheap to fix, and they are the ones
+   that produce confidently wrong answers. (1.1 is done, and turned out not to
+   be one of them — see the correction there.)
 2. **Delete-one-model and view-config** from section 2 — small, and they remove
    the two most common reasons to bypass the UI.
 3. **Data-cleaning patches** from section 4 — the prerequisite for any new
