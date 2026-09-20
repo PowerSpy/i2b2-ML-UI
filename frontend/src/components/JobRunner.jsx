@@ -28,11 +28,17 @@ export default function JobRunner({
   const [warnings, setWarnings] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-  const { job, status, done } = useJobPoll(jobId);
+  const { job, status, done, error: pollError } = useJobPoll(jobId);
   const notified = useRef(null);
 
   useEffect(() => {
-    if (done && status === "COMPLETED" && notified.current !== jobId) {
+    if (!done) return;
+    // Cleared here rather than when the POST returns. Submitting only queues the
+    // job, so re-enabling the button then let a second click queue another one —
+    // and because a build deletes every existing fact under the path first, that
+    // second run destroyed the first one's output mid-flight.
+    setBusy(false);
+    if (status === "COMPLETED" && notified.current !== jobId) {
       notified.current = jobId;
       onDone?.();
     }
@@ -45,13 +51,20 @@ export default function JobRunner({
     try {
       const res = await apiPost(endpoint, body);
       setWarnings(res.warnings ?? []);
-      // The queue POST does not hand back an id, so take the newest row.
-      const jobs = await apiGet("/jobs?limit=1");
-      if (!jobs.length) throw new Error("job was submitted but no row appeared");
-      setJobId(jobs[0].id);
+      // The id comes from the submission itself, anchored to the highest job id
+      // seen before it. Reading "the newest row" afterwards used to race: the
+      // row might not exist yet, so the newest was the *previous* job — often
+      // already COMPLETED, which reported instant success for a job that had
+      // not started.
+      if (res.job_id == null) {
+        throw new Error(
+          "the job was queued but could not be identified, so its progress " +
+            "cannot be tracked here — check the job list before resubmitting",
+        );
+      }
+      setJobId(res.job_id);
     } catch (e) {
       setError(e.message);
-    } finally {
       setBusy(false);
     }
   }
@@ -79,7 +92,14 @@ export default function JobRunner({
             </span>
           </p>
 
-          {status === "PENDING" && !watcherRunning && (
+          {pollError && (
+          <p className="text-xs text-amber-300/80">
+            lost contact while watching this job ({pollError}) — the status
+            above may be out of date. It is still queued; it has not failed.
+          </p>
+        )}
+
+        {status === "PENDING" && !watcherRunning && (
             <p className="text-xs text-red-400">
               queued, but the job watcher is stopped — this will never run until
               you start it.

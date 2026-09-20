@@ -1,5 +1,6 @@
 import shlex
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from app.core.config import settings
@@ -95,19 +96,49 @@ def wipe_cohorts() -> int:
 
 
 def list_cohorts() -> list[dict]:
+    """Every patient set, with its live membership and whether its name is unique.
+
+    `live` counts only members that still have facts, so a cohort left behind by
+    a reload shows the gap. It is computed here, in one query for every cohort,
+    rather than per cohort on demand — the pickers in steps 3 and 5 need it as
+    much as the cohort list does, and asking per row cost two container round
+    trips each.
+
+    `duplicate` matters more than it looks. The build engine resolves a cohort
+    *name* to every matching result_instance_id and unions them, so two sets
+    called the same thing silently train on the combination. On this instance
+    that meant 489 patients against a 297-patient dataset.
+    """
     rows = query(
-        "SELECT result_instance_id, description, set_size "
-        f"FROM {settings.db_schema}.qt_query_result_instance "
-        "ORDER BY result_instance_id DESC;"
+        "SELECT qri.result_instance_id AS id, qri.description, qri.set_size, "
+        "  COUNT(psc.patient_num) FILTER (WHERE f.patient_num IS NOT NULL) AS live "
+        f"FROM {settings.db_schema}.qt_query_result_instance qri "
+        f"LEFT JOIN {settings.db_schema}.qt_patient_set_collection psc "
+        "  ON psc.result_instance_id = qri.result_instance_id "
+        "LEFT JOIN (SELECT DISTINCT patient_num "
+        f"          FROM {settings.db_schema}.observation_fact) f "
+        "  ON f.patient_num = psc.patient_num "
+        "GROUP BY qri.result_instance_id, qri.description, qri.set_size "
+        "ORDER BY qri.result_instance_id DESC;"
     )
+
     out = []
     for r in rows:
         d = r["description"] or ""
         if d.startswith(PREFIX) and d.endswith('"'):
-            out.append({"id": int(r["result_instance_id"]),
-                        "name": d[len(PREFIX):-1],
-                        "size": int(r["set_size"] or 0)})
+            size = int(r["set_size"] or 0)
+            live = int(r["live"] or 0)
+            out.append({"id": int(r["id"]), "name": d[len(PREFIX):-1],
+                        "size": size, "live": live, "stale": live != size})
+
+    seen = Counter(c["name"] for c in out)
+    for c in out:
+        c["duplicate"] = seen[c["name"]] > 1
     return out
+
+
+def duplicate_names() -> list[str]:
+    return sorted({c["name"] for c in list_cohorts() if c["duplicate"]})
 
 def live_size(cohort_id: int) -> int:
     return int(scalar(

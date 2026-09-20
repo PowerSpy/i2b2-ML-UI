@@ -76,16 +76,43 @@ export default function FileLoader({ endpoint, prompt, params, children, onLoade
 
       {result && (
         <div className="space-y-3">
+          {/*
+            Rows gained, not exit status. The loader exits 0 whether it ingested
+            the file or skipped it, so "ok" on its own never meant anything had
+            been loaded.
+          */}
           <p className="text-sm">
-            status:{" "}
-            <span
-              className={
-                result.status === "ok" ? "text-emerald-400" : "text-red-400"
-              }
-            >
-              {result.status}
-            </span>
+            {result.rows_loaded != null ? (
+              <>
+                <span
+                  className={
+                    result.rows_loaded > 0 ? "text-emerald-400" : "text-red-400"
+                  }
+                >
+                  {result.rows_loaded.toLocaleString()} row
+                  {result.rows_loaded === 1 ? "" : "s"} loaded
+                </span>
+              </>
+            ) : (
+              <>
+                status:{" "}
+                <span
+                  className={
+                    result.status === "ok" ? "text-emerald-400" : "text-red-400"
+                  }
+                >
+                  {result.status}
+                </span>
+              </>
+            )}
           </p>
+
+          {result.note && (
+            <p className="rounded border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
+              {result.note}
+            </p>
+          )}
+
           <Output label="stdout" text={result.stdout} />
           <Output label="stderr" text={result.stderr} />
         </div>

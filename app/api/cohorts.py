@@ -10,6 +10,12 @@ class Cohort(BaseModel):
     id: int
     name: str
     size: int
+    # Members that still have facts. Differs from `size` after a reload.
+    live: int = 0
+    stale: bool = False
+    # Another patient set shares this name. The build engine unions same-named
+    # sets rather than picking one, so this is a correctness problem, not cosmetic.
+    duplicate: bool = False
 
 
 class Cohort_In(BaseModel):
@@ -68,10 +74,11 @@ def delete_cohort(cohort_id: int) -> Cohort_Delete:
 
 @router.get("/cohorts/{cohort_id}/size", response_model=Cohort_Size)
 def cohort_size(cohort_id: int) -> Cohort_Size:
+    """Kept for callers that ask about one cohort; /cohorts now carries this
+    for every row, so the UI no longer needs a request per cohort."""
     match = next((c for c in cohorts.list_cohorts() if c["id"] == cohort_id), None)
     if match is None:
         raise HTTPException(404, f"no cohort with id {cohort_id}")
 
-    live = cohorts.live_size(cohort_id)
-    return Cohort_Size(id=cohort_id, size=match["size"], live=live,
-                       stale=live != match["size"])
+    return Cohort_Size(id=cohort_id, size=match["size"], live=match["live"],
+                       stale=match["stale"])

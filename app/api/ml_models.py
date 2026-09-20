@@ -90,6 +90,11 @@ class Ml_Concept(BaseModel):
     # The estimator class actually fitted, recorded at build time. Only set on
     # models built since the registry patch; older ones report None.
     clf_type: str | None = None
+    # Whether the features this model was trained on still have facts. None when
+    # unknown (not built, or built before feature codes were recorded). False
+    # means the model is trained but its data is gone — applying it scores every
+    # patient off zero-filled columns.
+    features_present: bool | None = None
 
 
 class Model_Field(BaseModel):
@@ -154,12 +159,29 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     if "'" in body.description:
         raise HTTPException(400, "description cannot contain an apostrophe")
 
-    known = {c["name"] for c in cohorts.list_cohorts()}
-    unknown = sorted(
-        set(body.blob.positive_patient_set + body.blob.negative_patient_set) - known
-    )
+    all_cohorts = cohorts.list_cohorts()
+    referenced = set(body.blob.positive_patient_set + body.blob.negative_patient_set)
+
+    unknown = sorted(referenced - {c["name"] for c in all_cohorts})
     if unknown:
         raise HTTPException(400, f"unknown cohort(s): {', '.join(unknown)}")
+
+    # The engine resolves a cohort name to every result_instance_id that carries
+    # it and unions them, so an ambiguous name does not pick one set - it trains
+    # on all of them at once, silently.
+    ambiguous = sorted(referenced & {c["name"] for c in all_cohorts if c["duplicate"]})
+    if ambiguous:
+        raise HTTPException(
+            400,
+            f"cohort name(s) {', '.join(ambiguous)} refer to more than one patient set. "
+            "Training resolves a name to every matching set and unions them, so the "
+            "model would be trained on a population you did not choose. Delete the "
+            "duplicates in step 2, keeping the one you want.",
+        )
+
+    stale = sorted(
+        c["name"] for c in all_cohorts if c["name"] in referenced and c["stale"]
+    )
 
     # Catch the misconfiguration that otherwise surfaces only after a full
     # training run, as "All the N fits failed ... The target y needs to have
@@ -181,6 +203,11 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
         warnings.append(
             f"cohort(s) {', '.join(overlap)} are in both classes; patients in both are "
             "dropped from both, not assigned to one"
+        )
+    if stale:
+        warnings.append(
+            f"cohort(s) {', '.join(stale)} contain patients that no longer have facts; "
+            "the model will train on fewer patients than the cohort size suggests"
         )
     if ml_blob.is_built(body.code):
         warnings.append("this replaces the existing trained model — no history is kept")

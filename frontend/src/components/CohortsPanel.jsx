@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { apiDelete, apiGet, apiPost } from "../lib/api.js";
+import { apiDelete, apiPost } from "../lib/api.js";
 import Warning from "./Warning.jsx";
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -14,24 +14,14 @@ export default function CohortsPanel({ cohorts, concepts, onChange }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [sizes, setSizes] = useState({});
   const [wipeArmed, setWipeArmed] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    Promise.all(
-      cohorts.map((c) =>
-        apiGet(`/cohorts/${c.id}/size`)
-          .then((s) => [c.id, s])
-          .catch(() => [c.id, null]),
-      ),
-    ).then((pairs) => {
-      if (alive) setSizes(Object.fromEntries(pairs));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [cohorts]);
+  // Live counts arrive with the cohort list itself. This used to be one request
+  // per cohort — each costing two container round trips — refired on every
+  // refresh, for a number the list query can compute in a single join.
+  const sizes = Object.fromEntries(
+    cohorts.map((c) => [c.id, { live: c.live ?? c.size, stale: !!c.stale }]),
+  );
 
   const duplicate = cohorts.some((c) => c.name === name);
   const validName = NAME_RE.test(name);
@@ -101,7 +91,14 @@ export default function CohortsPanel({ cohorts, concepts, onChange }) {
               const live = sizes[c.id];
               return (
                 <tr key={c.id} className="border-t border-neutral-800/70">
-                  <td className="py-2">{c.name}</td>
+                  <td className="py-2">
+                    {c.name}
+                    {c.duplicate && (
+                      <span className="ml-2 rounded bg-red-950 px-1.5 py-0.5 text-[10px] text-red-300">
+                        duplicate name
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 text-neutral-500">{c.id}</td>
                   <td className="py-2 text-right tabular-nums">
                     {c.size.toLocaleString()}
@@ -138,6 +135,16 @@ export default function CohortsPanel({ cohorts, concepts, onChange }) {
         <Warning>
           A stale cohort still lists members whose facts were wiped. Training on
           one silently uses fewer patients than its size suggests.
+        </Warning>
+      )}
+
+      {cohorts.some((c) => c.duplicate) && (
+        <Warning>
+          Two or more patient sets share a name. Training resolves a cohort name
+          to <em>every</em> set carrying it and unions them, so a model would
+          train on the combination rather than the one you meant. Delete the
+          ones you do not want — models refuse to save against an ambiguous
+          name.
         </Warning>
       )}
 

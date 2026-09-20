@@ -163,20 +163,46 @@ def list_ml_concepts(path_prefix: str) -> list[dict]:
         "SELECT concept_cd, concept_path, name_char, "
         "  (concept_blob LIKE '%serialized_model%') AS built, "
         f"  {_blob_field('concept_blob', 'model_type')} AS model_type, "
-        f"  {_blob_field('concept_blob', 'clf_type')} AS clf_type "
+        f"  {_blob_field('concept_blob', 'clf_type')} AS clf_type, "
+        "  substring(concept_blob from "
+        "    '\"feature_column_codes\"\\s*:\\s*\\[([^\\]]*)\\]') AS feature_codes "
         f"FROM {settings.db_schema}.concept_dimension "
         f"WHERE concept_path LIKE '\\\\{like}%' "
         "  AND concept_blob IS NOT NULL AND concept_blob <> '' "
         "ORDER BY concept_path;"
     )
-    return [
-        {
+
+    # Being "built" only means a serialized model is stored. That blob survives
+    # `wipe all facts`, so without this every model still reads (built) after the
+    # warehouse is cleared, step 5 stays unblocked, and a model whose features are
+    # all gone can be applied. One extra query covers the whole list.
+    live_codes = {
+        r["concept_cd"]
+        for r in query(
+            "SELECT DISTINCT concept_cd "
+            f"FROM {settings.db_schema}.observation_fact;"
+        )
+    }
+
+    out = []
+    for r in rows:
+        built = r["built"] == "t"
+        features = [
+            c.strip().strip('"').strip("'")
+            for c in (r["feature_codes"] or "").split(",")
+            if c.strip()
+        ]
+        # Unknown rather than False when the model predates feature recording.
+        has_data = None if not (built and features) else any(
+            f in live_codes for f in features
+        )
+        out.append({
             "code": r["concept_cd"],
             "path": "/" + r["concept_path"].strip("\\").replace("\\", "/"),
             "description": r["name_char"],
-            "is_built": r["built"] == "t",
+            "is_built": built,
             "model_type": r["model_type"] or None,
             "clf_type": r["clf_type"] or None,
-        }
-        for r in rows
-    ]
+            "features_present": has_data,
+        })
+    return out
