@@ -67,7 +67,9 @@ function ModelRow({ model, metrics, config, cohorts, project }) {
             <span className="text-[13px] text-text-2">
               {metrics?.model_name ?? model.model_type ?? "algorithm not recorded"}
             </span>
-            {model.description && (
+            {/* The ETL defaults a model's description to its own code, so
+                showing both prints the code twice. */}
+            {model.description && model.description !== model.code && (
               <span className="truncate text-[12px] text-text-muted">
                 {model.description}
               </span>

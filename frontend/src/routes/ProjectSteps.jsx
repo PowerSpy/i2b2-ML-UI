@@ -15,6 +15,15 @@ import { Mono, Note, Num } from "../ui/Text.jsx";
 const SELECT =
   "min-h-[44px] w-full rounded-btn border border-border-strong bg-panel-sunk px-3 font-mono text-[13px] text-text-2";
 
+/**
+ * What to show beside a model's code in a dropdown. The ETL defaults a
+ * description to the code itself, so falling straight through to it prints
+ * the code twice; the path is more use in that case.
+ */
+function subtitle(m) {
+  return m.description && m.description !== m.code ? m.description : m.path;
+}
+
 /** Step 1. Two CSVs: concepts declare the columns, facts hold the values. */
 export function LoadStep({ project }) {
   const ws = useWorkspace();
@@ -70,13 +79,14 @@ export function CohortsStep() {
 
       <Callout tone="neutral" className="mt-4">
         Patient sets carry no concept path, so these{" "}
-        <Num>{count(ws.cohorts.length)}</Num> are shared across every project.
+        <Num>{count(ws.loading ? undefined : ws.cohorts.length)}</Num> are shared across
+        every project.
         Only the positive and negative sets are used for training; the third is
         for the apply step.
       </Callout>
 
       <div className="mt-5">
-        <CohortsPanel cohorts={ws.cohorts} concepts={ws.concepts} onChange={ws.refresh} />
+        <CohortsPanel cohorts={ws.cohorts} concepts={ws.concepts} onChange={ws.refresh} loading={ws.loading} />
       </div>
     </Card>
   );
@@ -173,7 +183,7 @@ export function TrainStep({ project, selected, onSelect }) {
                   <option key={m.code} value={m.code}>
                     {m.code}
                     {m.model_type ? ` [${m.model_type}]` : ""} —{" "}
-                    {m.description ?? m.path}
+                    {subtitle(m)}
                     {m.is_built ? " (built)" : ""}
                     {m.is_built && m.features_present === false
                       ? " — TRAINING DATA DELETED"
@@ -268,7 +278,7 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                 <option value="">— pick a model —</option>
                 {built.map((m) => (
                   <option key={m.code} value={m.code}>
-                    {m.code} — {m.description ?? m.path}
+                    {m.code} — {subtitle(m)}
                   </option>
                 ))}
               </select>
@@ -287,6 +297,7 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                     target cohort
                   </label>
                   <CohortPicker
+                    id="apply-target"
                     cohorts={ws.cohorts}
                     value={targetCohort}
                     onChange={onTarget}

@@ -6,7 +6,8 @@ import Callout, { Failed } from "../../ui/Callout.jsx";
 import { Heading, Mono, Note, Num } from "../../ui/Text.jsx";
 
 export default function Cohorts() {
-  const { cohorts, cohortsResult, concepts, refresh } = useWorkspace();
+  const { cohorts, cohortsResult, concepts, refresh, loading } = useWorkspace();
+  const total = loading ? undefined : cohorts.length;
 
   return (
     <div className="space-y-6">
@@ -23,14 +24,14 @@ export default function Cohorts() {
 
       <Callout tone="neutral" title="patient sets are warehouse-wide">
         Cohorts carry no concept path, so nothing scopes them to a project. Every
-        project page lists this same set of <Num>{count(cohorts.length)}</Num>.
+        project page lists this same set of <Num>{count(total)}</Num>.
       </Callout>
 
       <Card>
         <CardHeader
           title={
             <>
-              <Num>{count(cohorts.length)}</Num> patient sets
+              <Num>{count(total)}</Num> patient sets
             </>
           }
           hint="Recorded is the size the set stored when it was built; live counts the members that still have facts. A gap means the data was reloaded underneath it."
@@ -39,7 +40,7 @@ export default function Cohorts() {
           {cohortsResult?.error ? (
             <Failed what="the cohort list" error={cohortsResult.error} />
           ) : (
-            <CohortsPanel cohorts={cohorts} concepts={concepts} onChange={refresh} />
+            <CohortsPanel cohorts={cohorts} concepts={concepts} onChange={refresh} loading={loading} />
           )}
         </div>
       </Card>

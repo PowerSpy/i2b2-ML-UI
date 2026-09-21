@@ -26,8 +26,8 @@ export default function Models() {
         <CardHeader
           title={
             <>
-              <Num>{count(models.length)}</Num> models,{" "}
-              <Num>{count(built.length)}</Num> built
+              <Num>{count(loading ? undefined : models.length)}</Num> models,{" "}
+              <Num>{count(loading ? undefined : built.length)}</Num> built
             </>
           }
           hint="Ranking by one number hides the reasons a number might be wrong, so the flags sit on the row rather than behind it."

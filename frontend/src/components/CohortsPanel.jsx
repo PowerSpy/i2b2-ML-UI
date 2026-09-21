@@ -20,13 +20,14 @@ const FIELD =
  * when the set was built and the number of members that still have facts drift
  * apart. Both are shown; a mismatch is the "drifted" state.
  */
-export function CohortsTable({ cohorts, onDelete, busy }) {
+export function CohortsTable({ cohorts, onDelete, busy, loading = false }) {
   if (!cohorts.length) {
     return (
       <Empty>
-        No patient sets yet. A cohort is every patient holding one concept code
-        — you need one per class to train, plus one for the population you want
-        to score.
+        {loading
+          ? // An empty list mid-read is not the same as no cohorts existing.
+            "Reading patient sets…"
+          : "No patient sets yet. A cohort is every patient holding one concept code — you need one per class to train, plus one for the population you want to score."}
       </Empty>
     );
   }
@@ -96,7 +97,7 @@ export function CohortsTable({ cohorts, onDelete, busy }) {
 }
 
 /** The table plus the controls that change it. */
-export default function CohortsPanel({ cohorts, concepts, onChange }) {
+export default function CohortsPanel({ cohorts, concepts, onChange, loading = false }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -135,7 +136,7 @@ export default function CohortsPanel({ cohorts, concepts, onChange }) {
 
   return (
     <div className="space-y-5">
-      <CohortsTable cohorts={cohorts} onDelete={remove} busy={busy} />
+      <CohortsTable cohorts={cohorts} onDelete={remove} busy={busy} loading={loading} />
 
       {cohorts.some((c) => c.stale) && (
         <Callout tone="warn" title="stale membership">

@@ -29,11 +29,15 @@ export default function WorkspaceRail() {
       label: "Data health",
       to: href.section("data-health"),
       count: ws.alerts.length,
-      tone: ws.alerts.some((a) => a.tone === "danger")
-        ? "danger"
-        : ws.alerts.length
-          ? "warn"
-          : "positive",
+      // No green until the reads have landed — an all-clear dot on an
+      // unanswered question is the worst thing this rail could show.
+      tone: !ws.alertsKnown
+        ? null
+        : ws.alerts.some((a) => a.tone === "danger")
+          ? "danger"
+          : ws.alerts.length
+            ? "warn"
+            : "positive",
     },
   ];
 
@@ -58,7 +62,9 @@ export default function WorkspaceRail() {
                 <span>{item.label}</span>
                 <span className="flex items-center gap-2">
                   {item.tone && item.count > 0 && <Dot tone={item.tone} />}
-                  <Num className="text-[12px] text-text-muted">{item.count}</Num>
+                  <Num className="text-[12px] text-text-muted">
+                    {ws.loading ? "—" : item.count}
+                  </Num>
                 </span>
               </Link>
             );

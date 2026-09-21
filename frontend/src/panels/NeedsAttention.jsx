@@ -13,13 +13,21 @@ import { SectionLabel } from "../ui/Text.jsx";
  * "no open problems" and "this panel is broken" have to be distinguishable.
  */
 export default function NeedsAttention() {
-  const { alerts } = useWorkspace();
+  const { alerts, alertsKnown } = useWorkspace();
 
   return (
     <section>
       <SectionLabel className="mb-2.5">Needs attention</SectionLabel>
 
-      {alerts.length === 0 ? (
+      {!alertsKnown ? (
+        // An empty alert list before the reads land is "not asked yet", not a
+        // clean bill of health. Saying "nothing flagged" here would be the
+        // exact failure this panel exists to catch.
+        <Callout tone="neutral" title="checking">
+          Reading cohorts, models and the job table. Nothing is ruled out until
+          those land.
+        </Callout>
+      ) : alerts.length === 0 ? (
         <Callout tone="positive" title="nothing flagged">
           No stopped watcher, no drifted or duplicated cohort, no model whose
           data has been deleted, and no failed job in the last 20.

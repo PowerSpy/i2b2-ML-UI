@@ -156,13 +156,23 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
         <p className="mb-1.5 text-[12px] text-text-3" id="positive-label">
           positive cohorts
         </p>
-        <CohortMultiPicker cohorts={cohorts} values={positive} onChange={setPositive} />
+        <CohortMultiPicker
+          labelledBy="positive-label"
+          cohorts={cohorts}
+          values={positive}
+          onChange={setPositive}
+        />
       </div>
       <div>
         <p className="mb-1.5 text-[12px] text-text-3" id="negative-label">
           negative cohorts
         </p>
-        <CohortMultiPicker cohorts={cohorts} values={negative} onChange={setNegative} />
+        <CohortMultiPicker
+          labelledBy="negative-label"
+          cohorts={cohorts}
+          values={negative}
+          onChange={setNegative}
+        />
       </div>
 
       {overlap.length > 0 && (

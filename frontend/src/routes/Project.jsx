@@ -184,7 +184,7 @@ function Overview({ project }) {
           </Link>
         </CardHeader>
         <div className="mt-4">
-          <CohortsTable cohorts={ws.cohorts} />
+          <CohortsTable cohorts={ws.cohorts} loading={ws.loading} />
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
           Patient sets are warehouse-wide — nothing scopes them to a concept
@@ -198,7 +198,7 @@ function Overview({ project }) {
             <>
               Models in this project{" "}
               <Num className="text-text-muted">
-                {count(project.models.length)}
+                {count(ws.loading ? undefined : project.models.length)}
               </Num>
             </>
           }

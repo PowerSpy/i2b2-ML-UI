@@ -13,17 +13,25 @@ import { Mono, Num, SectionLabel } from "../ui/Text.jsx";
  * why the top bar carries the watcher state next to this.
  */
 export default function JobQueue() {
-  const { jobs, jobsError } = useWorkspace();
+  const { jobs, jobsError, jobsLoaded } = useWorkspace();
 
   return (
     <section>
       <div className="mb-2.5 flex items-baseline justify-between">
         <SectionLabel>Job queue</SectionLabel>
-        <Num className="text-[12px] text-text-muted">{jobs.length}</Num>
+        <Num className="text-[12px] text-text-muted">
+          {jobsLoaded ? jobs.length : "—"}
+        </Num>
       </div>
 
       {jobsError ? (
         <Failed what="the job queue" error={jobsError} />
+      ) : !jobsLoaded ? (
+        // Before the first poll the list is empty because nothing has been
+        // read, not because nothing has been queued.
+        <p className="rounded-row border border-dashed border-border px-4 py-5 text-center text-[12px] text-text-muted">
+          Reading the job table…
+        </p>
       ) : jobs.length === 0 ? (
         <p className="rounded-row border border-dashed border-border px-4 py-5 text-center text-[12px] text-text-muted">
           No jobs have been queued. A build or an apply adds a row here.

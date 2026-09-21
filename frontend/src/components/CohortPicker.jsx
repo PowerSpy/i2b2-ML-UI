@@ -31,6 +31,7 @@ const SELECT =
  * erroring — so this is never a text input.
  */
 export default function CohortPicker({
+  id,
   cohorts,
   value,
   onChange,
@@ -40,7 +41,10 @@ export default function CohortPicker({
 
   return (
     <div className="space-y-2">
+      {/* The caller renders the <label>, so its htmlFor needs this id to
+          land on the real control rather than on nothing. */}
       <select
+        id={id}
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
         className={SELECT}
@@ -57,7 +61,7 @@ export default function CohortPicker({
   );
 }
 
-export function CohortMultiPicker({ cohorts, values, onChange }) {
+export function CohortMultiPicker({ labelledBy, cohorts, values, onChange }) {
   function toggle(name) {
     onChange(
       values.includes(name) ? values.filter((v) => v !== name) : [...values, name],
@@ -72,7 +76,9 @@ export function CohortMultiPicker({ cohorts, values, onChange }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+      {/* A set of toggles, not a single control, so it is a labelled group
+          rather than something a <label for> could point at. */}
+      <div className="flex flex-wrap gap-2" role="group" aria-labelledby={labelledBy}>
         {cohorts.map((c) => {
           const on = values.includes(c.name);
           return (

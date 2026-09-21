@@ -42,7 +42,14 @@ export function WorkspaceProvider({ children }) {
   const [core, setCore] = useState({ loading: true });
   const [configs, setConfigs] = useState({});
   const [metrics, setMetrics] = useState({});
-  const [live, setLive] = useState({ watcher: null, watcherError: null, jobs: [] });
+  // jobsLoaded starts false so an empty list before the first poll is not
+  // rendered as "no jobs have ever been queued".
+  const [live, setLive] = useState({
+    watcher: null,
+    watcherError: null,
+    jobs: [],
+    jobsLoaded: false,
+  });
 
   // The core set: everything that only changes when someone changes it.
   useEffect(() => {
@@ -128,6 +135,7 @@ export function WorkspaceProvider({ children }) {
         watcherError: watcher.error ?? null,
         jobs: jobs.data ?? [],
         jobsError: jobs.error ?? null,
+        jobsLoaded: true,
       });
       timer = setTimeout(tick, POLL_MS);
     }
@@ -202,6 +210,10 @@ export function WorkspaceProvider({ children }) {
       watcherError: live.watcherError,
       jobs: live.jobs,
       jobsError: live.jobsError,
+      jobsLoaded: live.jobsLoaded,
+      // The alert set is only meaningful once the reads it is computed from
+      // have landed. Until then "no alerts" means "not asked yet".
+      alertsKnown: !core.loading && live.jobsLoaded,
       startWatcher,
 
       containers: containerStates(core, live),

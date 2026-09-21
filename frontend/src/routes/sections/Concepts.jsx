@@ -51,8 +51,8 @@ export default function Concepts() {
         <CardHeader
           title={
             <>
-              <Num>{count(rows.length)}</Num>
-              {rows.length !== concepts.length && (
+              <Num>{count(loading ? undefined : rows.length)}</Num>
+              {!loading && rows.length !== concepts.length && (
                 <span className="text-text-muted">
                   {" "}
                   of <Num>{count(concepts.length)}</Num>
