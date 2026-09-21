@@ -1,5 +1,7 @@
+import { Mono } from "../ui/Text.jsx";
+
 /** Toggle set over concept path prefixes. Each selection becomes a SQL LIKE. */
-export default function PathPicker({ label, tree, values, onChange, hint }) {
+export default function PathPicker({ label, tree, values, onChange, hint, id }) {
   function toggle(p) {
     onChange(values.includes(p) ? values.filter((v) => v !== p) : [...values, p]);
   }
@@ -7,29 +9,35 @@ export default function PathPicker({ label, tree, values, onChange, hint }) {
   return (
     <div>
       {label && (
-        <label className="mb-1 block text-xs text-neutral-500">{label}</label>
+        <p className="mb-1.5 text-[12px] text-text-3" id={id}>
+          {label}
+        </p>
       )}
       {tree.length === 0 ? (
-        <p className="text-xs text-neutral-500">no concept paths loaded</p>
+        <p className="text-[12px] text-text-muted">no concept paths loaded</p>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {tree.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => toggle(p)}
-              className={`rounded border px-2 py-1 text-xs ${
-                values.includes(p)
-                  ? "border-sky-600 bg-sky-950/60 text-sky-200"
-                  : "border-neutral-700 text-neutral-400 hover:border-neutral-500"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2" role="group" aria-labelledby={id}>
+          {tree.map((p) => {
+            const on = values.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggle(p)}
+                className={`min-h-[44px] rounded-btn border px-3 text-[12px] transition-colors ${
+                  on
+                    ? "border-accent bg-accent/10 text-text"
+                    : "border-border-strong text-text-3 hover:border-text-muted hover:text-text-2"
+                }`}
+              >
+                <Mono>{p}</Mono>
+              </button>
+            );
+          })}
         </div>
       )}
-      {hint && <p className="mt-1 text-xs text-neutral-500">{hint}</p>}
+      {hint && <p className="mt-2 text-[12px] leading-relaxed text-text-muted">{hint}</p>}
     </div>
   );
 }

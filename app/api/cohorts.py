@@ -72,6 +72,29 @@ def delete_cohort(cohort_id: int) -> Cohort_Delete:
         raise HTTPException(502, f"cohort delete failed: {e}")
 
 
+class Cohort_Definition(BaseModel):
+    id: int
+    # False when nothing records the concept behind the set. Never a guess:
+    # the app's own cohorts carry a placeholder item_key that names an
+    # unrelated diagnosis, and reporting it would be worse than silence.
+    recorded: bool
+    concept_path: str | None = None
+    concept_code: str | None = None
+    query_name: str | None = None
+    master_id: int | None = None
+    created: str | None = None
+    source: str | None = None
+    note: str
+
+
+@router.get("/cohorts/{cohort_id}/definition", response_model=Cohort_Definition)
+def cohort_definition(cohort_id: int) -> Cohort_Definition:
+    """The concept a cohort was built from, where that was recorded at all."""
+    if not any(c["id"] == cohort_id for c in cohorts.list_cohorts()):
+        raise HTTPException(404, f"no cohort with id {cohort_id}")
+    return Cohort_Definition(**cohorts.cohort_definition(cohort_id))
+
+
 @router.get("/cohorts/{cohort_id}/size", response_model=Cohort_Size)
 def cohort_size(cohort_id: int) -> Cohort_Size:
     """Kept for callers that ask about one cohort; /cohorts now carries this

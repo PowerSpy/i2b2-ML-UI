@@ -116,14 +116,32 @@ database container itself.
 | `DELETE` | `/api/delete-facts` | Delete all facts |
 | `GET` | `/api/concepts`, `/api/concept-tree` | Concept list and selectable path prefixes |
 | `GET`/`POST`/`DELETE` | `/api/cohorts` | Patient sets, with live size and duplicate-name flags |
+| `GET` | `/api/cohorts/{id}/definition` | The concept a cohort selected on, where anything recorded it |
+| `GET` | `/api/data-quality` | Duplicate, orphan and colliding rows across the warehouse |
 | `GET` | `/api/ml-model-types` | Algorithms the container's registry can build |
 | `GET`/`POST` | `/api/ml-concepts` | Model configs |
+| `DELETE` | `/api/ml-concepts/{code}` | Delete **one** model, rather than wiping every concept |
 | `GET` | `/api/ml-concepts/{code}/config\|metrics\|plots` | Stored config, metrics, diagnostic plots |
 | `POST` | `/api/jobs/build`, `/api/jobs/apply` | Queue a job; returns its id |
 | `GET` | `/api/jobs` | Recent job rows |
+| `POST` | `/api/jobs/{id}/reset` | Return a job stranded at `PROCESSING` to `PENDING` |
 | `GET`/`POST` | `/api/watcher`, `/api/watcher/start`, `/api/watcher/log` | Job watcher state |
 
 Interactive docs at `http://127.0.0.1:8003/docs`.
+
+Two of these report less than you might expect, on purpose:
+
+- **`/api/cohorts/{id}/definition`** returns `recorded: false` for every patient
+  set this app created. Those go through the ETL's test helper, which writes a
+  fixed `\i2b2\Diagnoses\ICD10\E11\` item_key into every query it makes — so
+  the stored definition names a Type 2 Diabetes code regardless of the actual
+  concept. It is withheld rather than shown, because a heart cohort labelled as
+  diabetes is worse than one labelled as unknown.
+- **`/api/data-quality`** attributes each fact to exactly one dataset. A concept
+  code declared under two roots (`age` is, on the review instance) cannot belong
+  to either, so those facts are counted in their own bucket. Joining
+  `observation_fact` to `concept_dimension` directly instead double-counts them
+  and invents patient overlap between datasets that share none.
 
 ## CSV requirements
 

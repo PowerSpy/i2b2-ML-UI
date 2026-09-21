@@ -119,6 +119,12 @@ class Ml_Concept_Out(BaseModel):
     warnings: list[str] = []
 
 
+class Ml_Concept_Deleted(BaseModel):
+    code: str
+    deleted: bool
+    warnings: list[str] = []
+
+
 class Metrics(BaseModel):
     headline: dict[str, float]
     thresholded: dict[str, float]
@@ -232,6 +238,46 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
             "blob": blob,
         })
     return Ml_Concept_Out(code=body.code, warnings=warnings)
+
+
+@router.delete("/ml-concepts/{code}", response_model=Ml_Concept_Deleted)
+def delete_ml_concept(code: str) -> Ml_Concept_Deleted:
+    """Remove one model, instead of wiping every concept to be rid of it.
+
+    Until this existed the only removal path was `delete concept`, which
+    truncates the whole concept table and takes every other model and every
+    loaded dataset with it. The ETL's own endpoint deletes a single concept by
+    path, so this is a thin pass-through — with the result read back, because
+    that endpoint answers 200 whether or not the row went away.
+    """
+    match = next(
+        (c for c in ml_blob.list_ml_concepts(settings.ml_root) if c["code"] == code),
+        None,
+    )
+    if match is None:
+        raise HTTPException(404, f"no model with code {code!r}")
+
+    was_built = match.get("is_built", False)
+    etl_api.delete("/etl/concepts", params={"cpath": _coded_path(match["path"])})
+
+    gone = not ml_blob.exists(code)
+    warnings = []
+    if not gone:
+        warnings.append(
+            "the ETL reported success but the concept is still present — it was "
+            "not deleted, despite the 200"
+        )
+    if gone and was_built:
+        warnings.append("the trained model went with it; there is no history and no undo")
+    # Predictions are ordinary facts under their own concept code, so removing
+    # the model concept leaves them behind, now pointing at nothing.
+    if gone:
+        warnings.append(
+            f"any prediction facts written under {code} remain in observation_fact "
+            "and no longer have a model behind them"
+        )
+
+    return Ml_Concept_Deleted(code=code, deleted=gone, warnings=warnings)
 
 
 @router.get("/ml-concepts/{code}/config")

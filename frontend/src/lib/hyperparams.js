@@ -17,6 +17,38 @@ export function defaultValues(fields) {
   );
 }
 
+/**
+ * The inverse of buildOverrides: a stored grid back into form values.
+ *
+ * Needed when editing. Without it the form reseeds every field to its default
+ * on load, so changing one knob silently reset the others — the saved model
+ * had 50 trees and the edit would quietly submit 100.
+ *
+ * Anything the grid does not mention keeps its default, which is correct: an
+ * absent key means the model's own default range applied.
+ */
+export function valuesFromOverrides(fields, overrides = {}) {
+  const values = defaultValues(fields);
+
+  for (const field of fields) {
+    if (!field.grid_key) continue;
+    const grid = overrides[field.grid_key];
+    if (!Array.isArray(grid) || grid.length === 0) continue;
+    values[field.id] = String(grid[0]);
+  }
+
+  // The two ANN layer fields share one hidden_layer_sizes tuple and have no
+  // grid key of their own, so they are unpacked by hand.
+  const layers = overrides["clf__hidden_layer_sizes"];
+  if (Array.isArray(layers) && Array.isArray(layers[0])) {
+    const [first, second] = layers[0];
+    if (first != null && "layer_1" in values) values.layer_1 = String(first);
+    if ("layer_2" in values) values.layer_2 = String(second ?? 0);
+  }
+
+  return values;
+}
+
 function readField(field, raw) {
   const text = (raw ?? "").trim();
   if (text === "") {

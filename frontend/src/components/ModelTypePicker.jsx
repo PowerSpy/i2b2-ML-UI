@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 
 import { apiGet } from "../lib/api.js";
-import { defaultValues } from "../lib/hyperparams.js";
+import { defaultValues, valuesFromOverrides } from "../lib/hyperparams.js";
+import Callout from "../ui/Callout.jsx";
+import { Num } from "../ui/Text.jsx";
+
+const FIELD =
+  "min-h-[44px] rounded-btn border border-border-strong bg-panel-sunk px-3 text-[13px] text-text placeholder:text-text-muted";
 
 /**
  * Algorithm choice plus that algorithm's hyperparameters.
@@ -10,7 +15,15 @@ import { defaultValues } from "../lib/hyperparams.js";
  * here, because an option we offer that the container does not have would not
  * fail — the builder falls back to logistic regression and reports success.
  */
-export default function ModelTypePicker({ value, onChange, values, onValuesChange }) {
+export default function ModelTypePicker({
+  value,
+  onChange,
+  values,
+  onValuesChange,
+  // A stored grid to seed from, when editing an existing model. Without it
+  // the form reseeds to defaults and a one-field edit resets the rest.
+  initialOverrides = null,
+}) {
   const [types, setTypes] = useState([]);
   const [error, setError] = useState(null);
 
@@ -27,7 +40,11 @@ export default function ModelTypePicker({ value, onChange, values, onValuesChang
         const initial = d.find((t) => t.key === value) ?? d[0];
         if (initial) {
           onChange(initial.key, initial.fields);
-          onValuesChange(defaultValues(initial.fields));
+          onValuesChange(
+            initialOverrides
+              ? valuesFromOverrides(initial.fields, initialOverrides)
+              : defaultValues(initial.fields),
+          );
         }
       })
       .catch((e) => alive && setError(e.message));
@@ -52,21 +69,25 @@ export default function ModelTypePicker({ value, onChange, values, onValuesChang
 
   if (error) {
     return (
-      <p className="rounded border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-300">
-        Could not read the model registry: {error}
-      </p>
+      <Callout tone="warn" title="model registry unreadable">
+        {error}. Until this clears, the algorithm list cannot be trusted to match
+        what the container can build.
+      </Callout>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div>
-        <label className="mb-1 block text-xs text-neutral-500">algorithm</label>
+        <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="algorithm">
+          algorithm
+        </label>
         <select
+          id="algorithm"
           value={value}
           onChange={(e) => pick(e.target.value)}
           disabled={types.length === 0}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 disabled:opacity-40"
+          className={`${FIELD} w-full font-mono disabled:opacity-40`}
         >
           {types.length === 0 && <option>loading…</option>}
           {types.map((t) => (
@@ -76,7 +97,9 @@ export default function ModelTypePicker({ value, onChange, values, onValuesChang
           ))}
         </select>
         {selected?.note && (
-          <p className="mt-1 text-xs text-neutral-500">{selected.note}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-text-muted">
+            {selected.note}
+          </p>
         )}
       </div>
 
@@ -84,24 +107,25 @@ export default function ModelTypePicker({ value, onChange, values, onValuesChang
         <div className="flex flex-wrap gap-3">
           {fields.map((f) => (
             <div key={f.id}>
-              <label className="mb-1 block text-xs text-neutral-500">
+              <label className="mb-1.5 block text-[12px] text-text-3" htmlFor={`hp-${f.id}`}>
                 {f.label}
               </label>
               <input
+                id={`hp-${f.id}`}
                 type="number"
                 step="any"
                 min={f.min}
                 max={f.max}
                 value={values[f.id] ?? ""}
                 placeholder={f.allow_blank ? "unlimited" : ""}
-                onChange={(e) =>
-                  onValuesChange({ ...values, [f.id]: e.target.value })
-                }
-                className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                onChange={(e) => onValuesChange({ ...values, [f.id]: e.target.value })}
+                className={`${FIELD} w-40 font-mono tabular-nums`}
               />
-              <p className="mt-0.5 text-[10px] text-neutral-600">
-                {f.min}–{f.max}
-                {f.allow_blank ? ", or blank" : ""}
+              <p className="mt-1 text-[10px] text-text-muted">
+                <Num>
+                  {f.min}–{f.max}
+                </Num>
+                {f.allow_blank ? ", or blank to search the default range" : ""}
               </p>
             </div>
           ))}

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
-import { apiGet, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import useJobPoll from "../lib/useJobPoll.js";
-import { Warnings } from "./Warning.jsx";
+import Button from "../ui/Button.jsx";
+import Callout from "../ui/Callout.jsx";
+import { Dot, jobTone } from "../ui/Status.jsx";
+import { Mono, SectionLabel } from "../ui/Text.jsx";
 
-const TONES = {
-  SUBMITTED: "bg-neutral-800 text-neutral-300",
-  PENDING: "bg-amber-950 text-amber-300",
-  PROCESSING: "bg-sky-950 text-sky-300",
-  COMPLETED: "bg-emerald-950 text-emerald-300",
-  ERROR: "bg-red-950 text-red-300",
+const TONE_TEXT = {
+  positive: "text-positive",
+  warn: "text-warn",
+  danger: "text-danger",
+  accent: "text-accent",
+  neutral: "text-text-3",
 };
 
 /**
@@ -72,68 +75,75 @@ export default function JobRunner({
     }
   }
 
+  const tone = jobTone(status);
+
   return (
     <div className="space-y-3">
-      <button
-        onClick={submit}
-        disabled={disabled || busy}
-        className="rounded bg-sky-800 px-3 py-1.5 text-sm text-sky-50 hover:bg-sky-700 disabled:opacity-40"
-      >
+      <Button variant="primary" onClick={submit} disabled={disabled || busy}>
         {busy ? "submitting…" : label}
-      </button>
+      </Button>
 
-      <Warnings items={warnings} />
+      {warnings.map((w) => (
+        <Callout key={w} tone="warn" title="before this runs">
+          {w}
+        </Callout>
+      ))}
 
       {status && (
-        <div className="space-y-2">
-          <p className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500">job {jobId ?? "?"}</span>
-            <span
-              className={`rounded px-2 py-0.5 font-medium ${TONES[status] ?? TONES.SUBMITTED}`}
-            >
-              {status}
+        <div className="space-y-3">
+          <p className="flex items-center gap-3 text-[12px]">
+            <Mono className="text-text-muted">job {jobId ?? "?"}</Mono>
+            <span className={`flex items-center gap-2 ${TONE_TEXT[tone] ?? TONE_TEXT.neutral}`}>
+              <Dot tone={tone} />
+              {status.toLowerCase()}
             </span>
           </p>
 
           {gaveUp && (
-          <p className="text-xs text-amber-300/80">
-            stopped watching after 20 minutes — the job may still be running.
-            Check the job list, or the watcher log if it never left PENDING.
-          </p>
-        )}
+            <Callout tone="warn" title="stopped watching">
+              No terminal status after 20 minutes — the job may still be running.
+              Check the job queue, or the watcher log if it never left PENDING.
+            </Callout>
+          )}
 
-        {pollError && (
-          <p className="text-xs text-amber-300/80">
-            lost contact while watching this job ({pollError}) — the status
-            above may be out of date. It is still queued; it has not failed.
-          </p>
-        )}
+          {pollError && (
+            <Callout tone="warn" title="lost contact">
+              {pollError}. The status above may be out of date. The job is still
+              queued; it has not failed.
+            </Callout>
+          )}
 
-        {status === "PENDING" && !watcherRunning && (
-            <p className="text-xs text-red-400">
-              queued, but the job watcher is stopped — this will never run until
+          {status === "PENDING" && !watcherRunning && (
+            <Callout tone="danger" title="nothing will pick this up">
+              Queued, but the job watcher is stopped. This will never run until
               you start it.
-            </p>
+            </Callout>
           )}
 
           {job?.error_stack && (
-            <pre className="max-h-64 overflow-auto rounded bg-neutral-900 p-3 text-xs whitespace-pre-wrap text-red-300">
-              {job.error_stack}
-            </pre>
+            <div>
+              <SectionLabel className="mb-1.5">error stack</SectionLabel>
+              <pre className="max-h-64 overflow-auto rounded-row border border-danger-edge bg-danger-edge/25 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-danger">
+                {job.error_stack}
+              </pre>
+            </div>
           )}
 
           {job?.output && status === "COMPLETED" && (
-            <pre className="max-h-40 overflow-auto rounded bg-neutral-900 p-3 text-xs whitespace-pre-wrap text-neutral-400">
-              {job.output}
-            </pre>
+            <div>
+              <SectionLabel className="mb-1.5">output</SectionLabel>
+              <pre className="max-h-40 overflow-auto rounded-row border border-border-soft bg-panel-sunk p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-text-3">
+                {job.output}
+              </pre>
+            </div>
           )}
         </div>
       )}
 
       {error && (
-        <p className="rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">
+        <Callout tone="danger" title="submission failed">
           {error}
-        </p>
+        </Callout>
       )}
     </div>
   );

@@ -1,6 +1,10 @@
 import { useState } from "react";
 
 import { apiDelete } from "../lib/api.js";
+import { count, plural } from "../lib/format.js";
+import Button from "../ui/Button.jsx";
+import { Status } from "../ui/Status.jsx";
+import { Num } from "../ui/Text.jsx";
 
 /**
  * Two-step delete: the first click arms it, the second fires. There is no undo
@@ -29,59 +33,50 @@ export default function DeleteButton({ endpoint, label, target, onDeleted }) {
   }
 
   if (busy) {
-    return <span className="text-xs text-neutral-400">deleting {target}…</span>;
+    return <Status tone="accent">deleting {target}…</Status>;
   }
 
   if (armed) {
     return (
-      <span className="flex items-center gap-2 text-xs">
-        <span className="text-neutral-300">Delete all {target}?</span>
-        <button
-          onClick={run}
-          className="rounded bg-red-900 px-2 py-1 text-red-100 hover:bg-red-800"
-        >
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[12px] text-text-2">Delete all {target}?</span>
+        <Button variant="danger" onClick={run}>
           yes, delete
-        </button>
-        <button
-          onClick={() => setArmed(false)}
-          className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:border-neutral-500"
-        >
-          cancel
-        </button>
-      </span>
+        </Button>
+        <Button onClick={() => setArmed(false)}>cancel</Button>
+      </div>
     );
   }
 
   return (
-    <span className="flex items-center gap-2 text-xs">
-      <button
-        onClick={() => setArmed(true)}
-        className="rounded border border-red-900 px-2 py-1 text-red-300 hover:bg-red-950/50"
-      >
-        {label}
-      </button>
-      {error && <span className="text-red-400">{error}</span>}
-      {result && result.status !== "ok" && (
-        <span className="text-red-400">
-          delete failed
-          {/* The CLI's own output, which the endpoint used to discard before
-              telling the user to go and read it. */}
-          {(result.stderr || result.stdout) && (
-            <pre className="mt-1 max-h-40 overflow-auto rounded bg-neutral-900 p-2 whitespace-pre-wrap text-red-300">
-              {(result.stderr || result.stdout).slice(-1500)}
-            </pre>
-          )}
-        </span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="danger" onClick={() => setArmed(true)}>
+          {label}
+        </Button>
+        {error && <Status tone="danger">{error}</Status>}
+        {result?.status === "ok" && (
+          <Status tone="positive">
+            {result.rows_removed == null ? (
+              "deleted"
+            ) : (
+              <>
+                <Num>{count(result.rows_removed)}</Num>{" "}
+                {plural(result.rows_removed, "row")} deleted
+              </>
+            )}
+          </Status>
+        )}
+        {result && result.status !== "ok" && <Status tone="danger">delete failed</Status>}
+      </div>
+
+      {/* The CLI's own output, which the endpoint used to discard before
+          telling the user to go and read it. */}
+      {result && result.status !== "ok" && (result.stderr || result.stdout) && (
+        <pre className="max-h-40 overflow-auto rounded-row border border-danger-edge bg-danger-edge/25 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-danger">
+          {(result.stderr || result.stdout).slice(-1500)}
+        </pre>
       )}
-      {result?.status === "ok" && (
-        <span className="text-emerald-400">
-          {result.rows_removed == null
-            ? "deleted"
-            : `${result.rows_removed.toLocaleString()} row${
-                result.rows_removed === 1 ? "" : "s"
-              } deleted`}
-        </span>
-      )}
-    </span>
+    </div>
   );
 }
