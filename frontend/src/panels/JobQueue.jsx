@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { apiPost } from "../lib/api.js";
 import { ago, firstLine } from "../lib/format.js";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Failed } from "../ui/Callout.jsx";
@@ -49,6 +52,25 @@ export default function JobQueue() {
 
 function JobRow({ job }) {
   const tone = jobTone(job.status);
+  const { refresh } = useWorkspace();
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState(null);
+
+  // A watcher killed mid-job leaves the row at PROCESSING for good: nothing
+  // times it out, and the next watcher only picks up PENDING. /jobs/{id}/reset
+  // flips it back, and until now nothing in the UI called it.
+  async function reset() {
+    setResetting(true);
+    setResetError(null);
+    try {
+      await apiPost(`/jobs/${job.id}/reset`, {});
+      refresh();
+    } catch (e) {
+      setResetError(e.message);
+    } finally {
+      setResetting(false);
+    }
+  }
   const when = ago(job.completed_on ?? job.started_on);
   const detail =
     job.status === "ERROR"
@@ -76,6 +98,26 @@ function JobRow({ job }) {
           </>
         )}
       </p>
+
+      {job.status === "PROCESSING" && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={reset}
+            disabled={resetting}
+            className="min-h-[44px] rounded-btn border border-border-strong px-3 text-[11px] text-text-3 hover:border-text-muted hover:text-text disabled:opacity-50"
+          >
+            {resetting ? "resetting…" : "reset to pending"}
+          </button>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-text-muted">
+            Only if the watcher died mid-run. Resetting a job that is genuinely
+            running makes a second watcher start it again alongside the first.
+          </p>
+          {resetError && (
+            <p className="mt-1 text-[11px] text-danger">{resetError}</p>
+          )}
+        </div>
+      )}
 
       {detail && (
         <p

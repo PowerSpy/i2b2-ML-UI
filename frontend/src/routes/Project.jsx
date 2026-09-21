@@ -30,6 +30,7 @@ export default function Project({ id }) {
   const [selectedModel, setSelectedModel] = useState(null);
   const [targetCohort, setTargetCohort] = useState(null);
   const [eventPaths, setEventPaths] = useState([]);
+  const [editingCode, setEditingCode] = useState(null);
 
   // Apply reads prediction_event_paths from the job rather than from the blob,
   // so this seeds them from the model's own label paths instead of making the
@@ -123,8 +124,11 @@ export default function Project({ id }) {
         ) : step === 3 ? (
           <DefineStep
             project={project}
+            editingCode={editingCode}
+            onEdit={setEditingCode}
             onCreated={(code) => {
               setSelectedModel(code);
+              setEditingCode(null);
               setStep(4);
             }}
           />
@@ -184,7 +188,11 @@ function Overview({ project }) {
           </Link>
         </CardHeader>
         <div className="mt-4">
-          <CohortsTable cohorts={ws.cohorts} loading={ws.loading} />
+          <CohortsTable
+            cohorts={ws.cohorts}
+            definitions={ws.cohortDefs}
+            loading={ws.loading}
+          />
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
           Patient sets are warehouse-wide — nothing scopes them to a concept

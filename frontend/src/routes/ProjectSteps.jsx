@@ -10,7 +10,7 @@ import { href, Link } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
 import Callout, { Empty } from "../ui/Callout.jsx";
-import { Mono, Note, Num } from "../ui/Text.jsx";
+import { Mono, Note, Num, SectionLabel } from "../ui/Text.jsx";
 
 const SELECT =
   "min-h-[44px] w-full rounded-btn border border-border-strong bg-panel-sunk px-3 font-mono text-[13px] text-text-2";
@@ -86,15 +86,25 @@ export function CohortsStep() {
       </Callout>
 
       <div className="mt-5">
-        <CohortsPanel cohorts={ws.cohorts} concepts={ws.concepts} onChange={ws.refresh} loading={ws.loading} />
+        <CohortsPanel
+          cohorts={ws.cohorts}
+          concepts={ws.concepts}
+          definitions={ws.cohortDefs}
+          onChange={ws.refresh}
+          loading={ws.loading}
+        />
       </div>
     </Card>
   );
 }
 
 /** Step 3. Which concepts are inputs, which is the answer. Trains nothing. */
-export function DefineStep({ project, onCreated }) {
+export function DefineStep({ project, onCreated, editingCode, onEdit }) {
   const ws = useWorkspace();
+  const editingModel = project.models.find((m) => m.code === editingCode) ?? null;
+  const editing = editingModel
+    ? { model: editingModel, config: ws.configs[editingModel.code]?.data ?? null }
+    : null;
 
   return (
     <Card>
@@ -124,14 +134,44 @@ export function DefineStep({ project, onCreated }) {
       ) : (
         <div className="mt-5">
           <ModelForm
+            // Remount on a change of target so the form's initial state is
+            // re-derived; prefill lives in useState initialisers.
+            key={editingCode ?? "new"}
             cohorts={ws.cohorts}
             tree={project.paths}
             concepts={project.concepts}
+            editing={editing}
+            onCancelEdit={() => onEdit?.(null)}
+            // Models land under their project rather than one shared folder,
+            // which is what let two studies collide in a flat namespace.
+            pathPrefix={`/ML/${project.id}`}
             onCreated={(code) => {
               onCreated?.(code);
               ws.refresh();
             }}
           />
+
+          {!editing && project.models.length > 0 && (
+            <div className="mt-6 border-t border-border-soft pt-5">
+              <SectionLabel className="mb-2.5">Edit an existing model</SectionLabel>
+              <div className="flex flex-wrap gap-2">
+                {project.models.map((m) => (
+                  <button
+                    key={m.code}
+                    type="button"
+                    onClick={() => onEdit?.(m.code)}
+                    className="min-h-[44px] rounded-btn border border-border-strong px-3 font-mono text-[12px] text-text-3 hover:border-text-muted hover:text-text"
+                  >
+                    {m.code}
+                  </button>
+                ))}
+              </div>
+              <Note className="mt-2">
+                Loads that model&apos;s stored config into the form above, so a
+                one-field change does not mean retyping the rest.
+              </Note>
+            </div>
+          )}
         </div>
       )}
     </Card>

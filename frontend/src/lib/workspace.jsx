@@ -42,6 +42,7 @@ export function WorkspaceProvider({ children }) {
   const [core, setCore] = useState({ loading: true });
   const [configs, setConfigs] = useState({});
   const [metrics, setMetrics] = useState({});
+  const [cohortDefs, setCohortDefs] = useState({});
   // jobsLoaded starts false so an empty list before the first poll is not
   // rendered as "no jobs have ever been queued".
   const [live, setLive] = useState({
@@ -117,6 +118,24 @@ export function WorkspaceProvider({ children }) {
       alive = false;
     };
   }, [models]);
+
+  // What each cohort was built from. A patient set stores a name and a size;
+  // the concept behind it lives on the query master that produced it, and for
+  // sets this app created it was never recorded at all — which the endpoint
+  // says rather than guessing.
+  const cohortList = core.cohorts?.data;
+  useEffect(() => {
+    if (!cohortList) return;
+    let alive = true;
+    Promise.all(
+      cohortList.map((c) =>
+        settle(apiGet(`/cohorts/${c.id}/definition`)).then((r) => [c.id, r]),
+      ),
+    ).then((entries) => alive && setCohortDefs(Object.fromEntries(entries)));
+    return () => {
+      alive = false;
+    };
+  }, [cohortList]);
 
   // The watcher and the job queue move without anyone touching the UI, and a
   // stopped watcher is the single most consequential thing on screen.
@@ -201,6 +220,7 @@ export function WorkspaceProvider({ children }) {
       modelTypes: core.modelTypes?.data ?? [],
       configs,
       metrics,
+      cohortDefs,
 
       projects,
       unattributed,
@@ -218,7 +238,7 @@ export function WorkspaceProvider({ children }) {
 
       containers: containerStates(core, live),
     };
-  }, [core, configs, metrics, live, version, refresh, startWatcher]);
+  }, [core, configs, metrics, cohortDefs, live, version, refresh, startWatcher]);
 
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

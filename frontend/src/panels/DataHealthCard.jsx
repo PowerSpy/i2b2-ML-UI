@@ -16,7 +16,13 @@ import { Stat } from "../ui/Meter.jsx";
 export default function DataHealthCard({ project = null }) {
   const { verify, refresh, loading, concepts } = useWorkspace();
 
-  const conceptCount = project ? project.concepts.length : concepts.length;
+  // An em dash until the read lands: a confident 0 here would claim the
+  // warehouse is empty when it has simply not been asked yet.
+  const conceptCount = loading
+    ? undefined
+    : project
+      ? project.concepts.length
+      : concepts.length;
   const sparse = project
     ? project.concepts.filter((c) => !c.type).length
     : concepts.filter((c) => !c.type).length;

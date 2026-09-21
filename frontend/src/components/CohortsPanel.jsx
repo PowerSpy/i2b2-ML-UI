@@ -20,7 +20,7 @@ const FIELD =
  * when the set was built and the number of members that still have facts drift
  * apart. Both are shown; a mismatch is the "drifted" state.
  */
-export function CohortsTable({ cohorts, onDelete, busy, loading = false }) {
+export function CohortsTable({ cohorts, definitions = {}, onDelete, busy, loading = false }) {
   if (!cohorts.length) {
     return (
       <Empty>
@@ -40,6 +40,7 @@ export function CohortsTable({ cohorts, onDelete, busy, loading = false }) {
           <Th>id</Th>
           <Th align="right">recorded</Th>
           <Th align="right">live</Th>
+          <Th>built from</Th>
           <Th>state</Th>
           {onDelete && <ThHidden>delete</ThHidden>}
         </tr>
@@ -63,6 +64,9 @@ export function CohortsTable({ cohorts, onDelete, busy, loading = false }) {
                 <Num className={c.stale ? "text-warn" : "text-text-2"}>
                   {count(live)}
                 </Num>
+              </Td>
+              <Td>
+                <Definition def={definitions[c.id]} />
               </Td>
               <Td>
                 {c.duplicate ? (
@@ -96,8 +100,37 @@ export function CohortsTable({ cohorts, onDelete, busy, loading = false }) {
   );
 }
 
+/**
+ * The concept a cohort selected on, where anything recorded it.
+ *
+ * Sets this app created carry a placeholder item_key naming an unrelated
+ * diagnosis — the backend refuses to return it, and this says "not recorded"
+ * rather than inventing something from the name.
+ */
+function Definition({ def }) {
+  const d = def?.data;
+  if (def?.error) {
+    return <span className="text-[11px] text-text-muted">unreadable</span>;
+  }
+  if (!d) {
+    return <span className="text-[11px] text-text-muted">…</span>;
+  }
+  if (!d.recorded) {
+    return (
+      <span className="text-[11px] text-text-muted" title={d.note}>
+        not recorded
+      </span>
+    );
+  }
+  return (
+    <Mono className="text-[12px] text-text-2" title={d.note}>
+      {d.concept_path ?? d.concept_code}
+    </Mono>
+  );
+}
+
 /** The table plus the controls that change it. */
-export default function CohortsPanel({ cohorts, concepts, onChange, loading = false }) {
+export default function CohortsPanel({ cohorts, concepts, definitions, onChange, loading = false }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -136,7 +169,13 @@ export default function CohortsPanel({ cohorts, concepts, onChange, loading = fa
 
   return (
     <div className="space-y-5">
-      <CohortsTable cohorts={cohorts} onDelete={remove} busy={busy} loading={loading} />
+      <CohortsTable
+        cohorts={cohorts}
+        definitions={definitions}
+        onDelete={remove}
+        busy={busy}
+        loading={loading}
+      />
 
       {cohorts.some((c) => c.stale) && (
         <Callout tone="warn" title="stale membership">

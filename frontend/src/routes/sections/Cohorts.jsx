@@ -6,7 +6,8 @@ import Callout, { Failed } from "../../ui/Callout.jsx";
 import { Heading, Mono, Note, Num } from "../../ui/Text.jsx";
 
 export default function Cohorts() {
-  const { cohorts, cohortsResult, concepts, refresh, loading } = useWorkspace();
+  const { cohorts, cohortsResult, concepts, cohortDefs, refresh, loading } =
+    useWorkspace();
   const total = loading ? undefined : cohorts.length;
 
   return (
@@ -40,7 +41,13 @@ export default function Cohorts() {
           {cohortsResult?.error ? (
             <Failed what="the cohort list" error={cohortsResult.error} />
           ) : (
-            <CohortsPanel cohorts={cohorts} concepts={concepts} onChange={refresh} loading={loading} />
+            <CohortsPanel
+              cohorts={cohorts}
+              concepts={concepts}
+              definitions={cohortDefs}
+              onChange={refresh}
+              loading={loading}
+            />
           )}
         </div>
       </Card>

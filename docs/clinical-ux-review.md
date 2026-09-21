@@ -176,20 +176,20 @@ inside a collapsed help panel.
 
 | Missing | Consequence |
 |---|---|
-| **Delete one model** | No endpoint exists. The only removal path is *wipe all concepts*, which destroys every model and every loaded concept. Clearing test models currently requires going around the app to the ETL API. |
-| **View a saved model's config** | The config endpoint is called once and all but `label_paths` is discarded. A model's cohorts, feature paths, algorithm and hyperparameters are invisible after saving. |
-| **Edit a model** | No load-into-form. Changing one hyperparameter means retyping code, description, both cohort sets, both path sets and the algorithm from memory. Re-saving overwrites the config outright; the "no history is kept" notice is returned *after* the write, as a receipt rather than a confirmation. |
-| **Export predictions** | The panel shows at most 100 patient numbers as comma-joined text. No pagination, no CSV. A 5,000-patient result set is not retrievable. |
-| **See job history** | The jobs endpoint supports 20 rows; the UI uses it only to find the newest id. A failed build from ten minutes ago is unreachable. |
-| **Read the watcher log** | `/watcher/log` exists and is never called. When a job sits at PENDING, the one artifact that explains why cannot be opened. |
-| **Recover a stranded job** | `/jobs/{id}/reset` exists and is never called. A job left PROCESSING by a killed watcher is permanently stuck from the UI. |
-| **Stop or restart the watcher** | Start only. The banner can detect multiple watchers racing for the same queue and tell the user about it, while offering no way to fix it. |
+| **Delete one model** *(fixed)* | `DELETE /api/ml-concepts/{code}` now wraps the ETL's own per-concept delete, with the result read back because that endpoint answers 200 either way. Originally: The only removal path is *wipe all concepts*, which destroys every model and every loaded concept. Clearing test models currently requires going around the app to the ETL API. |
+| **View a saved model's config** *(fixed)* | The model page shows cohorts, feature and label paths, algorithm, estimator class, test size, seed and hyperparameters. Originally: the config endpoint was called once and all but `label_paths` is discarded. A model's cohorts, feature paths, algorithm and hyperparameters are invisible after saving. |
+| **Edit a model** *(fixed)* | The define step loads a model's stored config back into the form, including its hyperparameter grid, and says what a re-save replaces before the write rather than after. Originally: no load-into-form. Changing one hyperparameter means retyping code, description, both cohort sets, both path sets and the algorithm from memory. Re-saving overwrites the config outright; the "no history is kept" notice is returned *after* the write, as a receipt rather than a confirmation. |
+| **Export predictions** *(fixed)* | The panel asks for the whole set and offers a CSV download. Originally: at most 100 patient numbers as comma-joined text. No pagination, no CSV. A 5,000-patient result set is not retrievable. |
+| **See job history** *(fixed)* | The job queue rail lists the last 20 with status, age and the first line of any stack trace. Originally: the jobs endpoint supports 20 rows; the UI uses it only to find the newest id. A failed build from ten minutes ago is unreachable. |
+| **Read the watcher log** *(fixed)* | A collapsible log panel on Data health calls it. Originally: `/watcher/log` existed and was never called. When a job sits at PENDING, the one artifact that explains why cannot be opened. |
+| **Recover a stranded job** *(fixed)* | A PROCESSING row offers *reset to pending*, with a warning about resetting a job that is genuinely running. Originally: `/jobs/{id}/reset` existed and was never called. A job left PROCESSING by a killed watcher is permanently stuck from the UI. |
+| **Stop or restart the watcher** *(not fixed — no endpoint)* | Start only; nothing can stop one. The UI now reports "no watcher" rather than "watcher stopped", because the probe cannot tell a stopped daemon from a stopped container. Originally: The banner can detect multiple watchers racing for the same queue and tell the user about it, while offering no way to fix it. |
 
 ---
 
 ## 3. What to build next, clinically
 
-### 3.1 Project / study folders
+### 3.1 Project / study folders *(fixed)*
 
 The strongest structural gap. Every model lands at a hardcoded
 `/ML/Diagnosis/<code>` path the user never sees or chooses. Two unrelated
@@ -201,7 +201,7 @@ cohorts, models, and loaded datasets, with the model list scoped to it. This
 also gives a natural home for the provenance and comparison features below, and
 makes "delete this study" a safe operation instead of a global wipe.
 
-### 3.2 Model provenance
+### 3.2 Model provenance *(fixed, minus timestamps)*
 
 Nothing records how a model came to exist. After the fact there is no way to
 answer: which cohorts trained this, how many patients, which features survived
@@ -212,9 +212,7 @@ showing config, data snapshot, metrics and plots in one exportable view would
 make results reportable and reproducible — which is the difference between a
 demo and something usable in a study.
 
-### 3.3 Model comparison
-
-*(partially addressed on branch — selection exists, comparison does not)*
+### 3.3 Model comparison *(fixed)*
 
 The reference webclient builds several algorithms in one submit and presents a
 metrics table, a grouped bar chart and CSV export. This UI trains one model at a
@@ -224,7 +222,12 @@ time and shows one model's metrics.
 researcher brings to this tool, and answering it currently means building
 models one by one and comparing numbers by hand across screens.
 
-### 3.4 Operating-point selection
+### 3.4 Operating-point selection *(blocked — needs container changes)*
+
+Blocked without container changes: per-patient probabilities are not stored
+anywhere, so no threshold slider here could be honest. The model page shows the
+confusion matrix at both thresholds side by side, which is the whole of what is
+recorded.
 
 Metrics are reported at the F1-optimal threshold while the stored model predicts
 at 0.5. The UI states this in a footnote, and the two disagree materially — on
@@ -235,13 +238,17 @@ sensitivity; a costly confirmatory workup wants specificity. The user should be
 able to move the threshold, see the confusion matrix and PPV/NPV update, and
 have the chosen point saved with the model so prediction honours it.
 
-### 3.5 Subgroup performance
+### 3.5 Subgroup performance *(blocked — needs container changes)*
+
+Blocked without container changes: the build records one set of metrics over
+the whole held-out split and no endpoint re-scores a slice. The model page marks
+the panel as not reported rather than leaving it out.
 
 A model can look strong overall and fail badly in a subgroup. The tool reports
 only pooled metrics, so there is no way to notice. Per-stratum performance
 (sex, age band, or any chosen assertion concept) would surface it.
 
-### 3.6 Data quality panel
+### 3.6 Data quality panel *(fixed)*
 
 Verification is currently two numbers: total facts and total concepts. It
 cannot distinguish a healthy warehouse from a badly polluted one.
@@ -253,10 +260,19 @@ the UI indicated this. A panel showing duplicate rows, per-concept fact counts,
 patients per dataset, and concept codes colliding across datasets would have
 made it obvious.
 
-### 3.7 Cohort definition transparency
+### 3.7 Cohort definition transparency *(fixed, as far as the data allows)*
 
 A cohort is stored only as a name and a patient count. The concept it was built
 from is not retained, so an unfamiliar cohort cannot be interpreted or rebuilt.
+
+The cohorts table now carries a **built from** column, filled from the query
+master's `generated_sql`. It is blank for every set this app created, and that
+is deliberate: those go through the ETL's test helper, which writes a fixed
+`\i2b2\Diagnoses\ICD10\E11\` item_key into every query it makes. All three
+heart cohorts on the review instance carry it, so surfacing it would label them
+Type 2 Diabetes. The endpoint detects the placeholder and reports *not
+recorded* instead. Recording the real concept needs a change to how the app
+creates patient sets.
 
 ---
 

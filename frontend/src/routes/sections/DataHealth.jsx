@@ -2,13 +2,16 @@ import DeleteButton from "../../components/DeleteButton.jsx";
 import { count, plural } from "../../lib/format.js";
 import { useWorkspace } from "../../lib/workspace.jsx";
 import DataHealthCard from "../../panels/DataHealthCard.jsx";
+import DataQuality from "../../panels/DataQuality.jsx";
+import WatcherLog from "../../panels/WatcherLog.jsx";
 import { Card, CardHeader } from "../../ui/Card.jsx";
 import Callout from "../../ui/Callout.jsx";
 import { Dot } from "../../ui/Status.jsx";
 import { Heading, Mono, Note, Num } from "../../ui/Text.jsx";
 
 export default function DataHealth() {
-  const { alerts, models, refresh, containers } = useWorkspace();
+  const { alerts, alertsKnown, models, refresh, containers, version, loading } =
+    useWorkspace();
   const builtCount = models.filter((m) => m.is_built).length;
 
   return (
@@ -26,18 +29,27 @@ export default function DataHealth() {
 
       <DataHealthCard />
 
+      {/* Section 3.6 of the clinical review: two totals cannot tell a healthy
+          warehouse from a badly polluted one. */}
+      <DataQuality refreshKey={version} />
+
       <Card>
         <CardHeader
           title={
             <>
-              <Num>{count(alerts.length)}</Num>{" "}
+              <Num>{count(alertsKnown ? alerts.length : undefined)}</Num>{" "}
               {plural(alerts.length, "open problem")}
             </>
           }
           hint="Each of these is a state the warehouse will not complain about on its own."
         />
         <div className="mt-4 space-y-2.5">
-          {alerts.length === 0 ? (
+          {!alertsKnown ? (
+            <Callout tone="neutral" title="checking">
+              Reading cohorts, models and the job table. Nothing is ruled out
+              until those land.
+            </Callout>
+          ) : alerts.length === 0 ? (
             <Callout tone="positive" title="nothing flagged">
               No stopped watcher, no drifted or duplicated cohort, no model whose
               training data has been deleted, and no failed job in the last 20.
@@ -93,6 +105,8 @@ export default function DataHealth() {
         </Note>
       </Card>
 
+      <WatcherLog />
+
       <Card className="border-danger-edge">
         <CardHeader
           title="Danger zone"
@@ -109,7 +123,8 @@ export default function DataHealth() {
             {models.length > 0 && (
               <Callout tone="danger" title="this destroys every model">
                 Models are concepts, so wiping concepts also destroys all{" "}
-                <Num>{count(models.length)}</Num> {plural(models.length, "model")}{" "}
+                <Num>{count(loading ? undefined : models.length)}</Num>{" "}
+                {plural(models.length, "model")}{" "}
                 — config and trained weights both
                 {builtCount > 0 && (
                   <>

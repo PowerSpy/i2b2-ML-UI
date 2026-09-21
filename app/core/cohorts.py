@@ -1,3 +1,4 @@
+import re
 import shlex
 import tempfile
 from collections import Counter
@@ -135,6 +136,106 @@ def list_cohorts() -> list[dict]:
     for c in out:
         c["duplicate"] = seen[c["name"]] > 1
     return out
+
+
+# The item_key tests/ML/test_helper.py writes into every query it creates.
+# It is a fixed string in that helper, not a description of the cohort: every
+# patient set this app has ever made carries it, including heart-disease sets,
+# where it claims a Type 2 Diabetes ICD-10 code. It must never be shown as a
+# cohort's definition.
+HELPER_ITEM_KEY = "\\i2b2\\Diagnoses\\ICD10\\E11\\"
+
+# What the CRC writes into generated_sql when it resolves a panel. This is the
+# real selection — it is the SQL that chose the patients.
+_PATH_LIKE = re.compile(r"concept_path\s+LIKE\s+'([^']+)'", re.I)
+_CODE_EQ = re.compile(r"concept_cd\s*=\s*'([^']+)'", re.I)
+_ITEM_KEY = re.compile(r"<item_key>([^<]*)</item_key>")
+
+
+def cohort_definition(cohort_id: int) -> dict:
+    """What a cohort was built from, or an honest statement that it is unknown.
+
+    A patient set stores a name and a size; the concept behind it lives on the
+    query master that produced it. Two kinds exist here and they are not
+    equally trustworthy:
+
+    - Sets built through the CRC have `generated_sql` naming the concept path
+      the panel resolved to. That is the actual selection and is reported.
+    - Sets built by this app go through the ETL's test helper, which leaves
+      `generated_sql` empty and stamps a hardcoded item_key into request_xml.
+      Nothing about the real concept is recorded, so this reports that rather
+      than the placeholder.
+    """
+    rows = query(
+        "SELECT m.query_master_id AS master_id, m.name, m.create_date, "
+        "  m.generated_sql, m.request_xml "
+        f"FROM {settings.db_schema}.qt_query_result_instance ri "
+        f"JOIN {settings.db_schema}.qt_query_instance qi "
+        "  ON qi.query_instance_id = ri.query_instance_id "
+        f"JOIN {settings.db_schema}.qt_query_master m "
+        "  ON m.query_master_id = qi.query_master_id "
+        f"WHERE ri.result_instance_id = {int(cohort_id)} "
+        "ORDER BY m.query_master_id DESC LIMIT 1;"
+    )
+    if not rows:
+        return {
+            "id": cohort_id,
+            "recorded": False,
+            "note": "no query master is linked to this patient set, so nothing "
+                    "records how it was built",
+        }
+
+    row = rows[0]
+    sql = row.get("generated_sql") or ""
+    xml = row.get("request_xml") or ""
+
+    def first(pattern: re.Pattern, text: str) -> str | None:
+        m = pattern.search(text)
+        return m.group(1) if m else None
+
+    item_key = first(_ITEM_KEY, xml)
+    path = first(_PATH_LIKE, sql)
+    code = first(_CODE_EQ, sql)
+
+    out = {
+        "id": cohort_id,
+        "master_id": int(row["master_id"]),
+        "query_name": row.get("name") or None,
+        "created": row.get("create_date") or None,
+    }
+
+    if path or code:
+        out.update({
+            "recorded": True,
+            "concept_path": _humanize(path) if path else None,
+            "concept_code": code,
+            "source": "generated_sql",
+            "note": "read from the SQL the query actually ran",
+        })
+        return out
+
+    placeholder = item_key is not None and item_key.strip() == HELPER_ITEM_KEY
+    out.update({
+        "recorded": False,
+        "concept_path": None,
+        "concept_code": None,
+        "source": None,
+        "note": (
+            "This set was created through the ETL's test helper, which records no "
+            "concept. The item_key stored alongside it is a fixed placeholder the "
+            "helper writes into every query it makes, so it describes nothing about "
+            "this cohort and is deliberately not shown."
+            if placeholder else
+            "The query master carries no resolved SQL, so the concept behind this "
+            "set was never recorded."
+        ),
+    })
+    return out
+
+
+def _humanize(coded: str) -> str:
+    """'\\\\HeartDisease\\\\label\\\\%' -> '/HeartDisease/label'."""
+    return "/" + coded.rstrip("%").strip("\\").replace("\\\\", "\\").replace("\\", "/").strip("/")
 
 
 def duplicate_names() -> list[str]:

@@ -1,10 +1,14 @@
+import { useState } from "react";
+
 import { PlotFigure, usePlots } from "../components/PlotsPanel.jsx";
 import { Centre, LeftRail, RightRail } from "../layout/Shell.jsx";
+import { apiDelete } from "../lib/api.js";
 import { count, plural, score, seconds } from "../lib/format.js";
 import { clfMismatch } from "../lib/projects.js";
-import { href, Link } from "../lib/router.jsx";
+import { href, Link, navigate } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import PipelineRailStub from "../panels/PipelineRailStub.jsx";
+import Button from "../ui/Button.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
 import Callout, { Empty, Failed, NotReported } from "../ui/Callout.jsx";
 import { Pill, Status } from "../ui/Status.jsx";
@@ -157,6 +161,7 @@ export default function Model({ code }) {
           usedCohorts={usedCohorts}
         />
         <Reproducibility usedCohorts={usedCohorts} config={config} />
+        <DeleteModel model={model} project={project} />
       </RightRail>
     </>
   );
@@ -544,6 +549,85 @@ function Reproducibility({ usedCohorts, config }) {
       behind this model still match their recorded size. Re-running the
       definition today would select the same patients.
     </Callout>
+  );
+}
+
+/**
+ * Remove this one model.
+ *
+ * Until the endpoint existed the only way to be rid of a model was to wipe
+ * every concept, which takes every other model and every loaded dataset with
+ * it. Two-step, like the other destructive controls, because there is no undo.
+ */
+function DeleteModel({ model, project }) {
+  const { refresh } = useWorkspace();
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiDelete(`/ml-concepts/${encodeURIComponent(model.code)}`);
+      setResult(res);
+      setArmed(false);
+      if (res.deleted) {
+        refresh();
+        navigate(project ? href.project(project.id) : href.section("models"));
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <SectionLabel className="mb-2.5">Remove</SectionLabel>
+
+      {armed ? (
+        <div className="space-y-3 rounded-card border border-danger-edge bg-danger-edge/35 p-4">
+          <p className="text-[12px] leading-relaxed text-text-2">
+            Delete <Mono className="text-text">{model.code}</Mono>
+            {model.is_built ? ", its config and its trained weights" : " and its config"}?
+            There is no history and no undo.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="danger" onClick={run} disabled={busy}>
+              {busy ? "deleting…" : "yes, delete it"}
+            </Button>
+            <Button onClick={() => setArmed(false)} disabled={busy}>
+              cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Button variant="danger" onClick={() => setArmed(true)}>
+            delete this model
+          </Button>
+          <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
+            Removes only this concept. Everything else — other models, cohorts
+            and every loaded dataset — is untouched.
+          </p>
+        </>
+      )}
+
+      {error && (
+        <Callout tone="danger" title="delete failed" className="mt-3">
+          {error}
+        </Callout>
+      )}
+      {result && !result.deleted && (
+        <Callout tone="danger" title="nothing was removed" className="mt-3">
+          {result.warnings?.[0] ??
+            "The ETL reported success but the concept is still present."}
+        </Callout>
+      )}
+    </section>
   );
 }
 

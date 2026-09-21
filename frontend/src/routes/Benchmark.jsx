@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { Centre, LeftRail, RightRail } from "../layout/Shell.jsx";
+import { downloadCsv } from "../lib/csv.js";
 import { count, score, seconds } from "../lib/format.js";
 import { clfMismatch, findProject, leaderboard } from "../lib/projects.js";
 import { href, Link } from "../lib/router.jsx";
@@ -385,37 +386,18 @@ function splitAgreement(rows, configs) {
 
 /** Client-side CSV of exactly the rows on screen. No endpoint is involved. */
 function exportCsv(project, rows) {
-  const header = [
-    "rank",
-    "code",
-    "algorithm",
-    "clf_type",
-    "roc_auc",
-    "f1",
-    "recall",
-    "build_time_sec",
-  ];
-  const body = rows.map((r, i) => [
-    i + 1,
-    r.model.code,
-    r.metrics.model_name ?? r.model.model_type ?? "",
-    r.metrics.clf_type ?? "",
-    r.metrics.headline?.roc_auc ?? "",
-    r.metrics.thresholded?.f1 ?? "",
-    r.metrics.thresholded?.recall ?? "",
-    r.metrics.build_time_sec ?? "",
-  ]);
-
-  const csv = [header, ...body]
-    .map((line) =>
-      line.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : cell)).join(","),
-    )
-    .join("\n");
-
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${project.id}_benchmark.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsv(
+    `${project.id}_benchmark.csv`,
+    ["rank", "code", "algorithm", "clf_type", "roc_auc", "f1", "recall", "build_time_sec"],
+    rows.map((r, i) => [
+      i + 1,
+      r.model.code,
+      r.metrics.model_name ?? r.model.model_type ?? "",
+      r.metrics.clf_type ?? "",
+      r.metrics.headline?.roc_auc ?? "",
+      r.metrics.thresholded?.f1 ?? "",
+      r.metrics.thresholded?.recall ?? "",
+      r.metrics.build_time_sec ?? "",
+    ]),
+  );
 }

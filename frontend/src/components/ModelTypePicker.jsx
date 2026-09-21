@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiGet } from "../lib/api.js";
-import { defaultValues } from "../lib/hyperparams.js";
+import { defaultValues, valuesFromOverrides } from "../lib/hyperparams.js";
 import Callout from "../ui/Callout.jsx";
 import { Num } from "../ui/Text.jsx";
 
@@ -15,7 +15,15 @@ const FIELD =
  * here, because an option we offer that the container does not have would not
  * fail — the builder falls back to logistic regression and reports success.
  */
-export default function ModelTypePicker({ value, onChange, values, onValuesChange }) {
+export default function ModelTypePicker({
+  value,
+  onChange,
+  values,
+  onValuesChange,
+  // A stored grid to seed from, when editing an existing model. Without it
+  // the form reseeds to defaults and a one-field edit resets the rest.
+  initialOverrides = null,
+}) {
   const [types, setTypes] = useState([]);
   const [error, setError] = useState(null);
 
@@ -32,7 +40,11 @@ export default function ModelTypePicker({ value, onChange, values, onValuesChang
         const initial = d.find((t) => t.key === value) ?? d[0];
         if (initial) {
           onChange(initial.key, initial.fields);
-          onValuesChange(defaultValues(initial.fields));
+          onValuesChange(
+            initialOverrides
+              ? valuesFromOverrides(initial.fields, initialOverrides)
+              : defaultValues(initial.fields),
+          );
         }
       })
       .catch((e) => alive && setError(e.message));

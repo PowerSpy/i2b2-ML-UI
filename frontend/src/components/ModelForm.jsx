@@ -39,17 +39,50 @@ function strayAssertions(concepts, dataPaths, labelPaths) {
     .map((c) => c.code);
 }
 
-/** A "model" is a concept whose blob holds the config. Defining one trains nothing. */
-export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
-  const [code, setCode] = useState("");
-  const [description, setDescription] = useState("");
-  const [positive, setPositive] = useState([]);
-  const [negative, setNegative] = useState([]);
-  const [dataPaths, setDataPaths] = useState([]);
-  const [labelPaths, setLabelPaths] = useState([]);
+/**
+ * A "model" is a concept whose blob holds the config. Defining one trains
+ * nothing.
+ *
+ * `editing` is an existing model plus its stored blob. Without it, changing
+ * one hyperparameter meant retyping the code, description, both cohort sets,
+ * both path sets and the algorithm from memory — and a re-save overwrites the
+ * config outright, so a half-remembered form silently replaced the real one.
+ *
+ * `pathPrefix` is where the concept lands. It follows the project rather than
+ * a hardcoded folder, so two studies do not share one flat namespace.
+ */
+export default function ModelForm({
+  cohorts,
+  tree,
+  concepts = [],
+  onCreated,
+  onCancelEdit,
+  editing = null,
+  pathPrefix = "/ML/Diagnosis",
+}) {
+  const blob = editing?.config ?? null;
+  const [code, setCode] = useState(editing?.model.code ?? "");
+  const [description, setDescription] = useState(
+    // The ETL defaults a description to the code; that is not worth carrying
+    // back into the field as if the user had typed it.
+    editing && editing.model.description !== editing.model.code
+      ? (editing.model.description ?? "")
+      : "",
+  );
+  const [positive, setPositive] = useState(blob?.positive_patient_set ?? []);
+  const [negative, setNegative] = useState(blob?.negative_patient_set ?? []);
+  const [dataPaths, setDataPaths] = useState(blob?.data_paths ?? []);
+  const [labelPaths, setLabelPaths] = useState(blob?.label_paths ?? []);
   const [advanced, setAdvanced] = useState(false);
-  const [opts, setOpts] = useState(Object.fromEntries(ADVANCED));
-  const [modelType, setModelType] = useState("logistic");
+  const [opts, setOpts] = useState(() => {
+    const base = Object.fromEntries(ADVANCED);
+    if (!blob) return base;
+    for (const key of Object.keys(base)) {
+      if (typeof blob[key] === "number") base[key] = blob[key];
+    }
+    return base;
+  });
+  const [modelType, setModelType] = useState(blob?.model_type ?? "logistic");
   const [hyperFields, setHyperFields] = useState([]);
   const [hyperValues, setHyperValues] = useState({});
   const [busy, setBusy] = useState(false);
@@ -57,7 +90,9 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
   const [warnings, setWarnings] = useState([]);
   const [hyperErrors, setHyperErrors] = useState([]);
 
-  const path = code ? `/ML/Diagnosis/${code}` : "";
+  // An edit keeps the concept where it already is; moving it would create a
+  // second model rather than change this one.
+  const path = editing ? editing.model.path : code ? `${pathPrefix}/${code}` : "";
   const apostrophe = description.includes("'");
   const overlap = positive.filter((p) => negative.includes(p));
 
@@ -112,6 +147,15 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
 
   return (
     <div className="space-y-5">
+      {editing && (
+        <Callout tone="warn" title="this replaces the saved config">
+          Saving overwrites <Mono className="text-text-2">{code}</Mono>&apos;s
+          stored config, and its trained weights once it is rebuilt. No history
+          is kept, and the model stays marked built against the old weights
+          until then.
+        </Callout>
+      )}
+
       <div className="flex flex-wrap gap-3">
         <div className="w-52">
           <label className="mb-1.5 block text-[12px] text-text-3" htmlFor="model-code">
@@ -122,7 +166,9 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="my_model"
-            className={`${FIELD} font-mono`}
+            readOnly={!!editing}
+            title={editing ? "The code identifies the concept and cannot change in an edit" : undefined}
+            className={`${FIELD} font-mono ${editing ? "text-text-3" : ""}`}
           />
         </div>
         <div className="min-w-0 flex-1">
@@ -221,6 +267,7 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
 
       <div className="space-y-3 border-t border-border-soft pt-5">
         <ModelTypePicker
+          initialOverrides={blob?.hyperparameters ?? null}
           value={modelType}
           onChange={(key, fields) => {
             setModelType(key);
@@ -265,9 +312,12 @@ export default function ModelForm({ cohorts, tree, concepts = [], onCreated }) {
       </div>
 
       <div className="space-y-2">
-        <Button variant="primary" onClick={submit} disabled={!canSubmit}>
-          {busy ? "saving…" : "Save model config"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="primary" onClick={submit} disabled={!canSubmit}>
+            {busy ? "saving…" : editing ? `Save changes to ${code}` : "Save model config"}
+          </Button>
+          {editing && <Button onClick={onCancelEdit}>cancel</Button>}
+        </div>
         {missing.length > 0 && (
           <p className="text-[12px] text-warn">
             Still needed: {missing.join(", ")}. Nothing is saved — and the train

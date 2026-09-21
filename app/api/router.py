@@ -9,6 +9,7 @@ from app.api import (
     loader,
     ml_models,
     predictions,
+    quality,
     watcher,
 )
 
@@ -22,3 +23,4 @@ api_router.include_router(ml_models.router, tags=["ml-concepts"])
 api_router.include_router(watcher.router, tags=["watcher"])
 api_router.include_router(jobs.router, tags=["jobs"])
 api_router.include_router(predictions.router, tags=["predictions"])
+api_router.include_router(quality.router, tags=["quality"])
