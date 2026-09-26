@@ -37,16 +37,19 @@ def _client_ip(request: Request) -> str | None:
 
 def _set_session_cookies(response: Response, token: str, csrf: str) -> None:
     common = {
-        "path": API_PREFIX,
         "samesite": "lax",
         "secure": settings.cookie_secure,
         "max_age": settings.session_ttl_hours * 3600,
     }
-    # HttpOnly: this one must never be reachable from JavaScript.
-    response.set_cookie(auth.COOKIE_NAME, token, httponly=True, **common)
-    # Deliberately readable: the frontend echoes it back in a header, and that
-    # echo is what proves the request came from our own origin.
-    response.set_cookie(auth.CSRF_COOKIE, csrf, httponly=False, **common)
+    # HttpOnly and scoped to the API: it is only ever sent, never read, and
+    # nothing outside /api needs it.
+    response.set_cookie(auth.COOKIE_NAME, token, httponly=True,
+                        path=API_PREFIX, **common)
+    # Readable, and at "/" rather than /api. The frontend is served from "/",
+    # and a cookie scoped to /api is invisible to document.cookie on those
+    # pages - so the header never got sent and every unsafe request 403'd.
+    response.set_cookie(auth.CSRF_COOKIE, csrf, httponly=False,
+                        path="/", **common)
 
 
 @router.post("/auth/login", response_model=Me)
@@ -99,7 +102,7 @@ def logout(request: Request, response: Response) -> dict:
             audit.event("logout", subject=found[0].username)
 
     response.delete_cookie(auth.COOKIE_NAME, path=API_PREFIX)
-    response.delete_cookie(auth.CSRF_COOKIE, path=API_PREFIX)
+    response.delete_cookie(auth.CSRF_COOKIE, path="/")
     return {"ok": True}
 
 

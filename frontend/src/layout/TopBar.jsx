@@ -1,6 +1,10 @@
+import { useState } from "react";
+
 import { href, isActive, Link, useRoute } from "../lib/router.jsx";
+import { useSession } from "../lib/session.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Dot } from "../ui/Status.jsx";
+import { Mono } from "../ui/Text.jsx";
 
 const NAV = [
   { label: "Projects", to: href.workspace() },
@@ -101,29 +105,61 @@ function EnginePill() {
   );
 }
 
+function initials(name) {
+  const parts = name.trim().split(/[\s._-]+/).filter(Boolean);
+  const letters = parts.length > 1
+    ? parts[0][0] + parts[parts.length - 1][0]
+    : name.slice(0, 2);
+  return letters.toUpperCase();
+}
+
 /**
- * There is no identity endpoint — the backend authenticates to the ETL with a
- * session id from its own config file and never tells the browser who that is.
- * Rendering a plausible name here would be inventing one, so the chip says what
- * it actually knows.
+ * Who is signed in, and what they are allowed to be.
+ *
+ * The role is not decoration. A researcher needs to know *why* half the
+ * controls are missing rather than assuming the app is broken, and a custodian
+ * needs to know they are the one who can destroy things.
  */
 function UserChip() {
+  const { user, role, logout } = useSession();
+  const [busy, setBusy] = useState(false);
+
+  if (!user) return null;
+
+  const name = user.display_name || user.username;
+
+  async function signOut() {
+    setBusy(true);
+    try {
+      await logout();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div
-      className="flex items-center gap-2.5"
-      title="The API exposes no current-user endpoint. The backend holds an i2b2 session id in config.yaml and does not surface the account behind it."
-    >
-      <span
-        aria-hidden="true"
-        className="flex size-[30px] items-center justify-center rounded-full border border-dashed border-border-strong font-mono text-[12px] text-text-muted"
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className="flex size-[30px] items-center justify-center rounded-full border border-border-strong bg-panel-sunk font-mono text-[11px] text-text-2"
+        >
+          {initials(name)}
+        </span>
+        <span className="leading-tight">
+          <span className="block text-[12px] text-text-2">{name}</span>
+          <Mono className="block text-[10px] text-text-muted">{role}</Mono>
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={signOut}
+        disabled={busy}
+        className="min-h-[44px] rounded-btn px-2 text-[12px] text-text-3 transition-colors hover:text-text disabled:text-text-muted"
       >
-        —
-      </span>
-      <span className="text-[11px] leading-tight text-text-muted">
-        signed-in user
-        <br />
-        not reported
-      </span>
+        {busy ? "signing out…" : "sign out"}
+      </button>
     </div>
   );
 }

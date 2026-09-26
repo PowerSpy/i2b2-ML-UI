@@ -11,9 +11,30 @@ import json
 from fastapi.testclient import TestClient
 
 
+PASSWORD = "correct horse battery staple"
+
+
 def _client():
     from app.main import app
     return TestClient(app)
+
+
+def _signed_in_client():
+    """A client with a live session.
+
+    Needed since the fail-closed mount: an anonymous call to an authenticated
+    route 401s before any handler runs, so it produces no container_exec row
+    to assert on.
+    """
+    from app.core import auth, passwords
+    from app.core.authz import Role
+
+    auth.create_user("alice", passwords.hash_password(PASSWORD), Role.CUSTODIAN)
+    client = _client()
+    res = client.post("/api/auth/login",
+                      json={"username": "alice", "password": PASSWORD})
+    assert res.status_code == 200, res.text
+    return client
 
 
 def test_health_carries_the_build_stamp(app_home):
@@ -46,7 +67,7 @@ def test_container_calls_are_attributed_to_their_request(app_home, fake_exec):
     container call underneath it carrying that same id."""
     from app.core import store
 
-    res = _client().get("/api/watcher")
+    res = _signed_in_client().get("/api/watcher")
     request_id = res.headers["X-Request-Id"]
 
     # Guard the fixture itself. Patching `docker_exec.exec` silently missed
@@ -71,7 +92,7 @@ def test_the_exec_row_records_what_actually_ran(app_home, fake_exec):
     """`docker_exec` is the ground-truth hook: it must record the command."""
     from app.core import store
 
-    _client().get("/api/watcher")
+    _signed_in_client().get("/api/watcher")
     assert fake_exec, "fake_exec intercepted nothing"
 
     rows = store.query(

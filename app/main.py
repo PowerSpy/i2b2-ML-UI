@@ -1,11 +1,12 @@
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.router import api_router
+from app.api.deps import current_principal
+from app.api.router import api_router, public_router
 from app.core import audit, store
 from app.core.config import API_PREFIX, APP_NAME, settings
 from app.core.etl_api import Etl_API_Error
@@ -74,7 +75,12 @@ def create_app() -> FastAPI:
     # reject it, and it should still time a response CORS rewrote.
     app.add_middleware(AuditMiddleware)
 
-    app.include_router(api_router, prefix=API_PREFIX)
+    app.include_router(public_router, prefix=API_PREFIX)
+    # Fail closed. Every route on api_router requires a session, including any
+    # added later - opting out means moving it to public_router in
+    # app/api/router.py, which is a visible edit in an obvious place.
+    app.include_router(api_router, prefix=API_PREFIX,
+                       dependencies=[Depends(current_principal)])
     return app
 
 

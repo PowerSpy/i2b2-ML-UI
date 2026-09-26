@@ -95,6 +95,27 @@ def test_session_cookie_is_httponly_and_csrf_cookie_is_not(client, custodian):
     assert "samesite=lax" in session.lower()
 
 
+def test_csrf_cookie_is_readable_from_the_app_root(client, custodian):
+    """Path matters, and getting it wrong breaks every mutation silently.
+
+    The frontend is served from "/", so a CSRF cookie scoped to /api is
+    invisible to `document.cookie` on every page of the app. No header gets
+    sent, and every POST and DELETE 403s - while login, /auth/me and every GET
+    keep working, so it looks like the app rather than the cookie.
+    """
+    res = login(client)
+    cookies = {}
+    for header in res.headers.get_list("set-cookie"):
+        name = header.split("=", 1)[0].strip()
+        cookies[name] = header.lower()
+
+    from app.core import auth
+
+    assert "path=/;" in cookies[auth.CSRF_COOKIE] or cookies[auth.CSRF_COOKIE].endswith("path=/")
+    # The session cookie is only ever sent, never read, so it stays narrow.
+    assert "path=/api" in cookies[auth.COOKIE_NAME]
+
+
 def test_wrong_password_and_unknown_user_are_indistinguishable(client, custodian):
     """Anything that differs turns this into a username oracle."""
     bad_pw = client.post("/api/auth/login",

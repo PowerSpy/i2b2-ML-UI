@@ -6,7 +6,13 @@ import { Heading, Note } from "./Text.jsx";
  * `sunk` is for a panel nested inside another card — a table body, a log, a
  * metric tile — which reads as recessed rather than as a second card.
  */
-export function Card({ children, className = "", sunk = false, as: Tag = "section" }) {
+export function Card({
+  children,
+  className = "",
+  sunk = false,
+  as: Tag = "section",
+  ...rest
+}) {
   return (
     <Tag
       className={`rounded-card border p-[18px] ${
@@ -14,6 +20,9 @@ export function Card({ children, className = "", sunk = false, as: Tag = "sectio
           ? "border-border-soft bg-panel-sunk"
           : "border-border bg-panel"
       } ${className}`}
+      // Forwarded so `as="form"` can carry onSubmit. Without this the prop is
+      // silently dropped and the form submits by navigating.
+      {...rest}
     >
       {children}
     </Tag>
