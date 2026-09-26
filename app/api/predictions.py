@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.core import cohorts, db, ml_blob
+from app.core import audit, cohorts, db, ml_blob
 from app.core.config import settings
 
 router = APIRouter()
@@ -46,6 +46,14 @@ def predictions(
             scored = cohorts.live_size(match["id"])
 
     warnings = _missing_feature_warnings(code)
+
+    # The one event that answers "did anyone pull patient identifiers, when,
+    # and how many". Counts only - the identifiers themselves are precisely
+    # what audit's denylist keeps out.
+    audit.event("patient_read", subject=code,
+                rows_returned=len(rows), limit_requested=limit,
+                total_available=total)
+
     return Predictions(code=code, total=total, scored=scored,
                        patients=[r["patient_num"] for r in rows], warnings=warnings)
 

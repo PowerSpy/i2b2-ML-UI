@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import shlex, tempfile, shutil
 from pathlib import Path
 
+from app.core import audit
 from app.core.config import settings
 from app.core.docker_exec import exec, exec_cp
 from app.core.upload import safe_upload_name, write_capped
@@ -110,7 +111,13 @@ def _stage_and_load(kind: str, file: UploadFile, extra_args: str = "") -> Load_O
                         f"source {settings.etl_venv}",
                         f"cd {settings.etl_app_dir}",
                         cmd)
-        return _load_result(kind, name, exec_out, before)
+        result = _load_result(kind, name, exec_out, before)
+        # rows_loaded, not exit status: the CLI exits 0 whether it ingested the
+        # file or skipped it, so the exit code is not evidence of a load.
+        audit.event("warehouse_write", subject=TABLE[kind],
+                    operation=f"{kind} load", status=result.status,
+                    rows_loaded=result.rows_loaded, filename=name)
+        return result
     finally:
         # Both copies are patient data. Without this they accumulate in host
         # /tmp and container /tmp indefinitely, readable by anything that can

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from app.core import audit
 from app.core.docker_exec import exec
 from app.core.config import settings
 
@@ -32,6 +33,10 @@ def _delete(kind: str, table: str) -> Delete:
                f"python -m i2b2_cdi {kind} delete")
     after = _count(table)
     removed = None if (before is None or after is None) else before - after
+
+    audit.event("warehouse_write", subject=table, operation=f"{kind} delete",
+                status="ok" if out.returncode == 0 else "error",
+                rows_removed=removed, rows_before=before, rows_after=after)
 
     return Delete(
         status="ok" if out.returncode == 0 else "error",

@@ -1,5 +1,6 @@
 import csv, io, re, shlex, sys
 
+from app.core import audit
 from app.core.config import settings
 from app.core.docker_exec import exec
 
@@ -45,8 +46,16 @@ def query(sql: str, timeout: float = 60.0) -> list[dict]:
                f"{settings.psql} --csv -c {shlex.quote(sql)}",
                timeout=timeout)
     if out.returncode != 0:
+        audit.event("db_query", status="error", subject=settings.db_container)
         raise RuntimeError(out.stderr.strip() or "psql failed")
-    return list(csv.DictReader(io.StringIO(out.stdout)))
+
+    rows = list(csv.DictReader(io.StringIO(out.stdout)))
+    # Row count only. The SQL text is already on the paired container_exec row
+    # under the same request_id, and the rows themselves are exactly what the
+    # audit denylist exists to keep out - this records how much came back, not
+    # what came back.
+    audit.event("db_query", subject=settings.db_container, row_count=len(rows))
+    return rows
 
 
 def scalar(sql: str) -> str | None:

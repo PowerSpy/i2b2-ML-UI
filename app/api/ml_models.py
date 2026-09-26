@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
-from app.core import cohorts, etl_api, ml_blob, ml_registry
+from app.core import audit, cohorts, etl_api, ml_blob, ml_registry
 from app.core.config import settings
 
 router = APIRouter()
@@ -220,7 +220,11 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
 
     blob = body.blob.model_dump()
 
-    if ml_blob.exists(body.code):
+    # Read once, before the write. Asking afterwards always answers True, and
+    # this is also the branch condition - two round trips for one fact.
+    existed = ml_blob.exists(body.code)
+
+    if existed:
         # POST on an existing code answers 200 and changes nothing, so a
         # re-save would silently keep the old algorithm while reporting
         # success. The update path is a PUT that takes the blob as a query
@@ -237,6 +241,9 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
             "description": body.description,
             "blob": blob,
         })
+    audit.event("model_saved", subject=body.code, path=body.path,
+                model_type=body.blob.model_type, replaced=existed,
+                warning_count=len(warnings))
     return Ml_Concept_Out(code=body.code, warnings=warnings)
 
 
@@ -277,6 +284,8 @@ def delete_ml_concept(code: str) -> Ml_Concept_Deleted:
             "and no longer have a model behind them"
         )
 
+    audit.event("model_deleted", subject=code, path=match["path"],
+                status="ok" if gone else "error", was_built=was_built)
     return Ml_Concept_Deleted(code=code, deleted=gone, warnings=warnings)
 
 

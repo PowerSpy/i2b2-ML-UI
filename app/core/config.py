@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     i2b2_project: str = "demo"
     i2b2_user: str = "demo"
 
+    # The app's own state, separate from the warehouse: audit now, users and
+    # sessions once the auth phase lands. Kept beside config.yaml rather than
+    # in a container, so it survives a `docker rm` and keeps working while the
+    # thing it is recording is broken.
+    app_db: Path = CONFIG_FILE.parent / "var" / "app.db"
+    audit_dir: Path = CONFIG_FILE.parent / "var" / "audit"
+    audit_enabled: bool = True
+
     # Ceilings on caller-supplied result sizes. Each of these is a psql or
     # `tail` call made through `docker exec`, so an unbounded one is a
     # denial of service on the container, not just a large response.

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.core import cohorts, db, etl_api, ml_blob
+from app.core import audit, cohorts, db, etl_api, ml_blob
 from app.core.config import settings
 
 router = APIRouter()
@@ -92,7 +92,12 @@ def build(body: Build_In) -> Job_Out:
         "input": {"path": body.path},
         "jobType": "ml",
     })
-    return Job_Out(queued=True, message=str(res), job_id=_job_created_after(before),
+    job_id = _job_created_after(before)
+    # Recorded at submission, not completion: a job that strands at
+    # PROCESSING leaves no other trace that it was ever asked for.
+    audit.event("job_submitted", subject=body.path, job_type="build",
+                job_id=job_id)
+    return Job_Out(queued=True, message=str(res), job_id=job_id,
                    warnings=[_wipe_warning(body.path)])
 
 
@@ -123,7 +128,10 @@ def apply(body: Apply_In) -> Job_Out:
         },
         "jobType": "ml",
     })
-    return Job_Out(queued=True, message=str(res), job_id=_job_created_after(before),
+    job_id = _job_created_after(before)
+    audit.event("job_submitted", subject=body.path, job_type="apply",
+                job_id=job_id, target_sets=len(body.target_patient_set))
+    return Job_Out(queued=True, message=str(res), job_id=job_id,
                    warnings=[_wipe_warning(body.path)])
 
 

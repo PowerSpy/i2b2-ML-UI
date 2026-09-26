@@ -1,0 +1,9 @@
+# Test-only. Not needed to run the app.
+#
+#   .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest
+#
+# httpx is here because FastAPI's TestClient needs it, not because the app
+# makes HTTP calls with it - the app uses requests (see app/core/etl_api.py).
+pytest>=8.0
+httpx>=0.27

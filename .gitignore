@@ -14,3 +14,4 @@ dist/
 
 config.yaml
 .gstack/
+var/

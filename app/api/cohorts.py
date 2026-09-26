@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core import cohorts
+from app.core import audit, cohorts
 
 router = APIRouter()
 
@@ -48,6 +48,9 @@ def create_cohort(body: Cohort_In) -> Cohort:
     except RuntimeError as e:
         raise HTTPException(502, f"cohort creation failed: {e}")
 
+    audit.event("cohort_created", subject=body.name,
+                cohort_id=cohort_id, concept_code=body.concept_code)
+
     for c in cohorts.list_cohorts():
         if c["id"] == cohort_id:
             return Cohort(**c)
@@ -57,7 +60,9 @@ def create_cohort(body: Cohort_In) -> Cohort:
 @router.delete("/cohorts", response_model=Cohort_Delete)
 def wipe_cohorts() -> Cohort_Delete:
     try:
-        return Cohort_Delete(deleted=cohorts.wipe_cohorts())
+        deleted = cohorts.wipe_cohorts()
+        audit.event("cohort_deleted", subject="*all*", deleted=deleted)
+        return Cohort_Delete(deleted=deleted)
     except RuntimeError as e:
         raise HTTPException(502, f"cohort wipe failed: {e}")
 
@@ -65,7 +70,9 @@ def wipe_cohorts() -> Cohort_Delete:
 @router.delete("/cohorts/{cohort_id}", response_model=Cohort_Delete)
 def delete_cohort(cohort_id: int) -> Cohort_Delete:
     try:
-        return Cohort_Delete(deleted=cohorts.delete_cohorts([cohort_id]))
+        deleted = cohorts.delete_cohorts([cohort_id])
+        audit.event("cohort_deleted", subject=str(cohort_id), deleted=deleted)
+        return Cohort_Delete(deleted=deleted)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except RuntimeError as e:
