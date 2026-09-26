@@ -78,6 +78,64 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS audit_kind   ON audit_event (kind, ts_utc);",
     "CREATE INDEX IF NOT EXISTS audit_actor  ON audit_event (actor_username, ts_utc);",
     "CREATE INDEX IF NOT EXISTS audit_req    ON audit_event (request_id);",
+
+    # Accounts. COLLATE NOCASE so "Alice" and "alice" cannot both exist - two
+    # accounts differing only by case is a phishing surface, not a feature.
+    """
+    CREATE TABLE IF NOT EXISTS app_user (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+        display_name  TEXT,
+        role          TEXT    NOT NULL CHECK (role IN ('custodian','researcher')),
+        pw_hash       TEXT    NOT NULL,
+        disabled      INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT    NOT NULL,
+        created_by    TEXT
+    );
+    """,
+
+    # Sessions. The primary key is sha256 of the cookie value, never the value
+    # itself: a stolen database must not hand over live sessions as well as
+    # password hashes.
+    """
+    CREATE TABLE IF NOT EXISTS app_session (
+        token_hash    TEXT    PRIMARY KEY,
+        csrf_token    TEXT    NOT NULL,
+        user_id       INTEGER NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+        created_at    TEXT    NOT NULL,
+        expires_at    TEXT    NOT NULL,
+        last_seen_at  TEXT,
+        client_ip     TEXT,
+        user_agent    TEXT
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS session_user ON app_session (user_id);",
+    "CREATE INDEX IF NOT EXISTS session_exp  ON app_session (expires_at);",
+
+    # The app's only notion of ownership. Needed before any researcher account
+    # exists: POST /jobs/build deletes every fact under a caller-supplied path,
+    # so "which models may this person touch" has to be answerable.
+    """
+    CREATE TABLE IF NOT EXISTS model_owner (
+        code          TEXT    PRIMARY KEY,
+        path          TEXT    NOT NULL,
+        owner_id      INTEGER NOT NULL REFERENCES app_user(id),
+        created_at    TEXT    NOT NULL
+    );
+    """,
+
+    # Login throttling. Rows are counted within a window, not kept forever.
+    """
+    CREATE TABLE IF NOT EXISTS login_attempt (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts_utc        TEXT    NOT NULL,
+        username      TEXT,
+        client_ip     TEXT,
+        ok            INTEGER NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS attempt_user ON login_attempt (username, ts_utc);",
+    "CREATE INDEX IF NOT EXISTS attempt_ip   ON login_attempt (client_ip, ts_utc);",
 ]
 
 

@@ -200,6 +200,16 @@ def request_context(request_id: str, method: str, path: str, client_ip: str | No
         _client_ip.reset(tokens[2])
 
 
+def set_actor(principal) -> None:
+    """Bind the caller for the rest of this request.
+
+    A plain set rather than a context manager: the ContextVar is already
+    scoped to the request by `request_context`, so it does not need unwinding
+    and the dependency that calls this has no block to wrap.
+    """
+    _actor.set(principal)
+
+
 @contextmanager
 def actor(principal) -> None:
     """Bind the caller. Used by the auth phase; a no-op until then."""

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    auth,
     cohorts,
     concepts,
     delete,
@@ -14,7 +15,11 @@ from app.api import (
 )
 
 api_router = APIRouter()
+
+# Public by necessity. Step 3 splits these onto their own router and makes
+# everything else authenticated at the mount point.
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(loader.router, tags=["load"])
 api_router.include_router(delete.router, tags=["delete"])
 api_router.include_router(concepts.router, tags=["concepts"])

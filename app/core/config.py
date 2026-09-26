@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # sessions once the auth phase lands. Kept beside config.yaml rather than
     # in a container, so it survives a `docker rm` and keeps working while the
     # thing it is recording is broken.
+    # Sessions. Sliding within this window, hard-capped at 7 days from login
+    # (app/core/auth.py MAX_LIFETIME) so a tab left open is not a permanent
+    # credential.
+    session_ttl_hours: int = 12
+    # MUST become True once this is served over TLS. It is False by default
+    # because the app binds loopback today and a Secure cookie would simply
+    # never be sent over http://localhost.
+    cookie_secure: bool = False
+
     app_db: Path = CONFIG_FILE.parent / "var" / "app.db"
     audit_dir: Path = CONFIG_FILE.parent / "var" / "audit"
     audit_enabled: bool = True
