@@ -1,3 +1,4 @@
+import sys
 import time
 
 from fastapi import Depends, FastAPI, Request
@@ -51,12 +52,68 @@ class AuditMiddleware(BaseHTTPMiddleware):
             return response
 
 
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _warn_if_exposed() -> None:
+    """Shout if this is bound off-loopback with loopback settings.
+
+    The bind address is the only thing protecting this app today, and the
+    defaults below are correct precisely because of it — a Secure cookie is
+    never sent over http://localhost, so `cookie_secure` has to default False
+    to work locally at all.
+
+    The failure mode is someone changing `host` to 0.0.0.0 and inheriting
+    every local default silently. This does not refuse to start, because
+    refusing mid-deploy is its own kind of damage, but it makes the mistake
+    impossible to miss in a log.
+    """
+    if settings.host in LOOPBACK:
+        return
+
+    problems = []
+    if not settings.cookie_secure:
+        problems.append(
+            "cookie_secure is False - session cookies will be sent in clear "
+            "text. Set it True and terminate TLS in front of this."
+        )
+    if settings.reload:
+        problems.append(
+            "reload is True - the server re-executes code on file write, "
+            "which is a code-execution path on a writable deployment."
+        )
+    if any("localhost" in o or "127.0.0.1" in o for o in settings.cors_origins):
+        problems.append(
+            f"cors_origins still lists a localhost origin ({settings.cors_origins})."
+        )
+
+    # Worth saying even when nothing else is wrong: the docker-group privilege
+    # this process holds is root-equivalent on the host, and it stops being an
+    # accepted local risk the moment the API is reachable from elsewhere.
+    problems.append(
+        "this process can `docker exec` into the i2b2 containers, which is "
+        "root-equivalent on the host - it should not be reachable from an "
+        "untrusted network without a privileged-helper split."
+    )
+
+    banner = "!" * 72
+    print(f"\n{banner}", file=sys.stderr)
+    print(f"  bound to {settings.host}:{settings.port}, not loopback", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+    print(f"{banner}\n", file=sys.stderr)
+
+    audit.event("exposed_bind", status="error", host=settings.host,
+                port=settings.port, problem_count=len(problems))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=APP_NAME)
 
     # Before anything can serve a request, so a failure here is a loud startup
     # failure rather than a silently absent audit trail.
     store.migrate()
+    _warn_if_exposed()
 
     @app.exception_handler(Etl_API_Error)
     def etl_error(request: Request, exc: Etl_API_Error) -> JSONResponse:
