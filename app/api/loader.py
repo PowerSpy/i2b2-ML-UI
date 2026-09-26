@@ -1,10 +1,11 @@
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
-import tempfile, shutil
+import shlex, tempfile, shutil
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.docker_exec import exec, exec_cp
+from app.core.upload import safe_upload_name, write_capped
 
 router = APIRouter()
 
@@ -65,66 +66,70 @@ class Verify(BaseModel):
     concepts: int
     facts: int
 
-@router.post("/load-concepts", response_model=Load_Out)
-def load_concepts(file: UploadFile = File(...)) -> Load_Out:
-    # TODO: normalize filename
-    host_dir = Path(tempfile.gettempdir()) / Path(file.filename).stem
-    host_dir.mkdir(parents=True, exist_ok=True)
-    host_path = host_dir / file.filename
+TABLE = {"concept": "concept_dimension", "fact": "observation_fact"}
+
+
+def _stage_and_load(kind: str, file: UploadFile, extra_args: str = "") -> Load_Out:
+    """Stage one upload and run the loader over it.
+
+    The staging directory is generated, never derived from the upload. It is
+    the directory name - not the filename - that ends up interpolated into the
+    command this runs through `bash -lc`, so deriving it from
+    `Path(file.filename).stem` put an attacker-controlled string into a shell.
+    """
+    try:
+        name = safe_upload_name(file.filename, kind=kind)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    host_dir = Path(tempfile.mkdtemp(prefix="i2b2ml-"))
     # A plain string, not Path: on Windows Path("/tmp/x") is a WindowsPath
     # that interpolates as "\tmp\x", so the container was handed a path
     # that does not exist. The loader then globbed nothing and exited 0,
     # which looked exactly like a successful load.
     container_path = f"/tmp/{host_dir.name}"
 
-    # Save at host_path
-    with host_path.open("wb") as fh:
-        shutil.copyfileobj(file.file, fh)
-    # Copy the dir into Container — dest is the parent, so it lands as container_path
-    copy = exec_cp(CONTAINER, host_dir, "/tmp")
-    if copy.returncode != 0:
-        return Load_Out(
-            status="error",
-            stdout=copy.stdout,
-            stderr=copy.stderr
-        )
+    try:
+        try:
+            write_capped(file.file, host_dir / name)
+        except ValueError as e:
+            raise HTTPException(413, str(e))
 
-    before = _count("concept_dimension")
-    concept_load_cmd = f"python -m i2b2_cdi concept load -i {container_path}"
-    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", concept_load_cmd)
-    return _load_result("concept", file.filename, exec_out, before)
+        # dest is the parent, so the directory lands as container_path
+        copy = exec_cp(CONTAINER, host_dir, "/tmp")
+        if copy.returncode != 0:
+            return Load_Out(status="error", stdout=copy.stdout, stderr=copy.stderr)
+
+        before = _count(TABLE[kind])
+        # quoted even though container_path is now generated: db.py already
+        # establishes shlex.quote as what this codebase does to anything
+        # crossing into `bash -lc`, and the loader should not be the exception.
+        cmd = (f"python -m i2b2_cdi {kind} load -i "
+               f"{shlex.quote(container_path)}{extra_args}")
+        exec_out = exec(CONTAINER,
+                        f"source {settings.etl_venv}",
+                        f"cd {settings.etl_app_dir}",
+                        cmd)
+        return _load_result(kind, name, exec_out, before)
+    finally:
+        # Both copies are patient data. Without this they accumulate in host
+        # /tmp and container /tmp indefinitely, readable by anything that can
+        # docker exec.
+        shutil.rmtree(host_dir, ignore_errors=True)
+        exec(CONTAINER, f"rm -rf -- {shlex.quote(container_path)}")
+
+
+@router.post("/load-concepts", response_model=Load_Out)
+def load_concepts(file: UploadFile = File(...)) -> Load_Out:
+    return _stage_and_load("concept", file)
 
 
 @router.post("/load-facts", response_model=Load_Out)
 def load_facts(file: UploadFile = File(...), mrn_are_patient_numbers = True) -> Load_Out:
-    # TODO: normalize filename
-    host_dir = Path(tempfile.gettempdir()) / Path(file.filename).stem
-    host_dir.mkdir(parents=True, exist_ok=True)
-    host_path = host_dir / file.filename
-    # A plain string, not Path: on Windows Path("/tmp/x") is a WindowsPath
-    # that interpolates as "\tmp\x", so the container was handed a path
-    # that does not exist. The loader then globbed nothing and exited 0,
-    # which looked exactly like a successful load.
-    container_path = f"/tmp/{host_dir.name}"
-
-    # Save at host_path
-    with host_path.open("wb") as fh:
-        shutil.copyfileobj(file.file, fh)
-    # Copy the dir into Container — dest is the parent, so it lands as container_path
-    copy = exec_cp(CONTAINER, host_dir, "/tmp")
-    if copy.returncode != 0:
-        return Load_Out(
-            status="error",
-            stdout=copy.stdout,
-            stderr=copy.stderr
-        )
-
-    before = _count("observation_fact")
-    concept_load_cmd = f"python -m i2b2_cdi fact load -i {container_path}"
-    if mrn_are_patient_numbers:
-        concept_load_cmd += " --mrn-are-patient-numbers"
-    exec_out = exec(CONTAINER, f"source {settings.etl_venv}", f"cd {settings.etl_app_dir}", concept_load_cmd)
-    return _load_result("fact", file.filename, exec_out, before)
+    return _stage_and_load(
+        "fact", file,
+        extra_args=" --mrn-are-patient-numbers" if mrn_are_patient_numbers else "",
+    )
 
 @router.get("/verify-load", response_model=Verify)
 def verify_load() -> Verify:

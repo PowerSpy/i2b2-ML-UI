@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core import cohorts, db, etl_api, ml_blob
@@ -128,7 +128,9 @@ def apply(body: Apply_In) -> Job_Out:
 
 
 @router.get("/jobs", response_model=list[Job])
-def list_jobs(limit: int = 20) -> list[Job]:
+def list_jobs(
+    limit: int = Query(20, ge=1, le=settings.max_job_rows),
+) -> list[Job]:
     rows = db.query(
         f"SELECT id, {', '.join(JOB_COLUMNS)} "
         f"FROM {settings.db_schema}.job ORDER BY id DESC LIMIT {int(limit)};"

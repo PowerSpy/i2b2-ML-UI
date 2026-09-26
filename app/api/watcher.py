@@ -1,7 +1,7 @@
 import shlex
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -84,6 +84,8 @@ def watcher_start() -> Watcher_Status:
 
 
 @router.get("/watcher/log", response_model=Watcher_Log)
-def watcher_log(lines: int = 100) -> Watcher_Log:
+def watcher_log(
+    lines: int = Query(100, ge=1, le=settings.max_log_lines),
+) -> Watcher_Log:
     out = exec(settings.container, f"tail -{int(lines)} {LOG} 2>/dev/null || true")
     return Watcher_Log(lines=out.stdout)

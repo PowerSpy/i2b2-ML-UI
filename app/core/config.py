@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     i2b2_project: str = "demo"
     i2b2_user: str = "demo"
 
+    # Ceilings on caller-supplied result sizes. Each of these is a psql or
+    # `tail` call made through `docker exec`, so an unbounded one is a
+    # denial of service on the container, not just a large response.
+    max_prediction_rows: int = 10_000
+    max_job_rows: int = 500
+    max_log_lines: int = 5_000
+
     ml_root: str = "/ML"
     ml_time_buffer: int = 0
     ml_sample_size_limit: int = 100_000

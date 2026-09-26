@@ -172,9 +172,26 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
     data.loc[data['subject_id'].isin(pos_patient_set['subject_id']), 'label'] = 1
     data.loc[data['subject_id'].isin(neg_patient_set['subject_id']), 'label'] = 0
 
-    pt_num_list=data['subject_id']
-    data = data.drop(columns=['subject_id'])
     data = data.dropna(subset=['label'])  # Ensure no NaN in label column
+
+    # Captured below every row filter, and re-indexed, because load_pred_facts
+    # pairs these two *positionally*:
+    #
+    #     for index, patient_num in enumerate(pt_num_list):
+    #         if Y_pred[index]:
+    #
+    # y_pred is built as pd.Series(model.predict(...)) over the surviving rows,
+    # so it carries a fresh 0..n-1 index. A pt_num_list captured above a filter
+    # holds pre-filter positions, which would attribute one patient's
+    # prediction to another for the surviving prefix and then KeyError.
+    #
+    # Today the dropna is a no-op - last_val is already filtered to sel_ptl
+    # members above, and every one of those carries a 0/1 label - so nothing
+    # misfires. That stops being true the moment anything upstream can drop a
+    # row, which is why the capture moved rather than being left alone.
+    data = data.reset_index(drop=True)
+    pt_num_list = data['subject_id'].reset_index(drop=True)
+    data = data.drop(columns=['subject_id'])
 
     print('after removing concepts with large prop. of missing values',data.shape)
     y=data['label']

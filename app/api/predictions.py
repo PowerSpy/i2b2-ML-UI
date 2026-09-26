@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core import cohorts, db, ml_blob
@@ -22,7 +22,11 @@ class Predictions(BaseModel):
 
 
 @router.get("/predictions/{code}", response_model=Predictions)
-def predictions(code: str, limit: int = 100, target_cohort: str | None = None) -> Predictions:
+def predictions(
+    code: str,
+    limit: int = Query(100, ge=1, le=settings.max_prediction_rows),
+    target_cohort: str | None = None,
+) -> Predictions:
     try:
         db.check_code(code)
     except ValueError as e:

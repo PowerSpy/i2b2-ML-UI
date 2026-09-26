@@ -1,6 +1,38 @@
---- docker-changes/apply_build_model_ml.py.orig	2026-09-19 17:54:04.001260900 -0500
-+++ docker-changes/i2b2_cdi/ML/apply_build_model_ml.py	2026-09-19 16:38:58.000000000 -0500
-@@ -183,21 +183,13 @@
+diff --git docker-changes/apply_build_model_ml.py.orig docker-changes/i2b2_cdi/ML/apply_build_model_ml.py
+index 06aea6d..98561df 100644
+--- docker-changes/apply_build_model_ml.py.orig
++++ docker-changes/i2b2_cdi/ML/apply_build_model_ml.py
+@@ -172,10 +172,27 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
+     data.loc[data['subject_id'].isin(pos_patient_set['subject_id']), 'label'] = 1
+     data.loc[data['subject_id'].isin(neg_patient_set['subject_id']), 'label'] = 0
+ 
+-    pt_num_list=data['subject_id']
+-    data = data.drop(columns=['subject_id'])
+     data = data.dropna(subset=['label'])  # Ensure no NaN in label column
+ 
++    # Captured below every row filter, and re-indexed, because load_pred_facts
++    # pairs these two *positionally*:
++    #
++    #     for index, patient_num in enumerate(pt_num_list):
++    #         if Y_pred[index]:
++    #
++    # y_pred is built as pd.Series(model.predict(...)) over the surviving rows,
++    # so it carries a fresh 0..n-1 index. A pt_num_list captured above a filter
++    # holds pre-filter positions, which would attribute one patient's
++    # prediction to another for the surviving prefix and then KeyError.
++    #
++    # Today the dropna is a no-op - last_val is already filtered to sel_ptl
++    # members above, and every one of those carries a 0/1 label - so nothing
++    # misfires. That stops being true the moment anything upstream can drop a
++    # row, which is why the capture moved rather than being left alone.
++    data = data.reset_index(drop=True)
++    pt_num_list = data['subject_id'].reset_index(drop=True)
++    data = data.drop(columns=['subject_id'])
++
+     print('after removing concepts with large prop. of missing values',data.shape)
+     y=data['label']
+     y = y.astype(int)
+@@ -183,21 +200,13 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
      X=data.drop(columns=['label'])
      X= X.fillna(0)#.sample(frac=0.1, random_state=42).reset_index(drop=True)
    
@@ -29,7 +61,7 @@
  
      if params['task']=='build':
          X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=int(params['random_seed']*1000),test_size=params['test_size'])
-@@ -257,13 +249,57 @@
+@@ -257,13 +266,57 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
  
          #>>>>>>>>>>>>>>>>>>>>>>>>
          #params,metrics,prediction_pipeline,selected_features=run_model_and_log1(name="LogisticRegression", pipeline=lr_pipeline, param_grid=lr_grid,concept_name_dict=concept_name_dict,X=X,y=y,params=params)

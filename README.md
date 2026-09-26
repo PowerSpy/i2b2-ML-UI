@@ -147,9 +147,17 @@ Two of these report less than you might expect, on purpose:
 
 The i2b2 loader takes a **directory**, not a file, and globs it for filenames
 ending in `concepts.csv` or `facts.csv`. The upload endpoints handle the
-directory part — each upload gets its own directory — but **the filename suffix
-still matters**. A file named `breastcancer_concepts.csv` is picked up;
-`breastcancer.csv` is silently ignored.
+directory part — each upload gets its own generated directory — but **the
+filename suffix still matters**. A file named `breastcancer_concepts.csv` is
+picked up; `breastcancer.csv` is not.
 
-"Silently" is literal: when the glob matches nothing, the CLI logs its options
-banner, does nothing, and exits 0.
+The CLI itself is silent about this: when the glob matches nothing it logs its
+options banner, does nothing, and exits 0. The upload endpoints no longer let it
+get that far — a name that would be ignored is rejected with **400** up front,
+and the message says why. Names are also restricted to letters, digits, dot,
+underscore and hyphen, up to 120 characters, because the name crosses into a
+shell command inside the container. Anything else is rejected rather than
+cleaned up.
+
+Uploads are capped at 512 MB and both the host and container copies are deleted
+once the load finishes, however it finishes.
