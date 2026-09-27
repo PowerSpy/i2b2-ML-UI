@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import current_principal
-from app.core import audit, authz, cohorts, db, etl_api, ml_blob, ml_registry
+from app.core import (audit, authz, cohorts, db, etl_api, ml_blob, ml_registry,
+                      transform_store)
 from app.core.auth import Principal
 from app.core.config import settings
 
@@ -282,6 +283,22 @@ def create_ml_concept(
     # Read once, before the write. Asking afterwards always answers True, and
     # this is also the branch condition - two round trips for one fact.
     existed = ml_blob.exists(body.code)
+
+    if existed:
+        # The form builds its blob from scratch and this endpoint writes it
+        # whole, so without carrying these four keys across, changing the
+        # algorithm or a cohort would **silently delete the model's feature
+        # transform** - and the next build would train on raw columns and
+        # report success.
+        #
+        # Done here rather than in the form, so a future form that has never
+        # heard of transforms still cannot destroy one.
+        transform_store.carry_forward(blob, ml_blob.load_blob_light(body.code))
+        if transform_store.SOURCE in blob:
+            warnings.append(
+                "this model has a feature transform; it has been kept, and the "
+                "rebuild will run it"
+            )
 
     if existed:
         # POST on an existing code answers 200 and changes nothing, so a

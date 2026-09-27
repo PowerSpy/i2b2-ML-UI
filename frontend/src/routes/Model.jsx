@@ -9,7 +9,7 @@ import { href, Link, navigate } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import DataDictionary from "../panels/DataDictionary.jsx";
 import PipelineRailStub from "../panels/PipelineRailStub.jsx";
-import Button from "../ui/Button.jsx";
+import Button, { ButtonLink } from "../ui/Button.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
 import Callout, { Empty, Failed, NotReported } from "../ui/Callout.jsx";
 import { Pill, Status } from "../ui/Status.jsx";
@@ -151,6 +151,8 @@ export default function Model({ code }) {
 
               {/* Scoped to this model: its data paths minus its label paths,
                   over its training cohorts - the frame a build assembles. */}
+              <TransformCard code={code} mine={model.mine} />
+
               <DataDictionary
                 endpoint={`/ml-concepts/${encodeURIComponent(code)}/data-dictionary`}
                 title="Columns this model trains on"
@@ -646,4 +648,30 @@ function cohortsUsed(cohorts, config) {
     ...(config?.negative_patient_set ?? []),
   ]);
   return cohorts.filter((c) => names.has(c.name));
+}
+
+/**
+ * The way into the feature-transform editor.
+ *
+ * Shown to everyone who can see the model, and enabled only for someone who
+ * may edit it - the server enforces the same rule, and a control that is
+ * present but refused is clearer than one that silently is not there.
+ */
+function TransformCard({ code, mine }) {
+  return (
+    <Card>
+      <CardHeader
+        title="Feature transform"
+        hint="Write Python that reshapes this model's columns before it trains. Your code runs against generated rows, never a patient."
+      >
+        {mine ? (
+          <ButtonLink href={href(`/model/${encodeURIComponent(code)}/transform`)}>
+            open editor
+          </ButtonLink>
+        ) : (
+          <Pill tone="neutral">read only</Pill>
+        )}
+      </CardHeader>
+    </Card>
+  );
 }

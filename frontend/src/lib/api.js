@@ -132,3 +132,14 @@ export async function apiPost(path, body) {
     }),
   );
 }
+
+export async function apiPut(path, body) {
+  return unwrap(
+    await fetch(`${BASE}${path}`, {
+      method: "PUT",
+      credentials: CREDENTIALS,
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify(body),
+    }),
+  );
+}

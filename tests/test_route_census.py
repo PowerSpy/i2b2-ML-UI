@@ -55,6 +55,11 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # a container, not because the frame is confidential.
     ("POST", "/api/ml-concepts/{code}/transform/dry-run"): OWNED,
     ("GET", "/api/ml-concepts/{code}/transform/frame"): OWNED,
+    # Reading the stored source is metadata, like the model's config. Saving
+    # or removing it is gated per model by the handler.
+    ("GET", "/api/ml-concepts/{code}/transform"): SESSION,
+    ("PUT", "/api/ml-concepts/{code}/transform"): OWNED,
+    ("DELETE", "/api/ml-concepts/{code}/transform"): OWNED,
     ("GET", "/api/ml-model-types"): SESSION,
     ("GET", "/api/ml-concepts"): SESSION,
     ("POST", "/api/ml-concepts"): OWNED,

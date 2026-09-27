@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react";
+
 import Shell, { Centre, LeftRail, RightRail } from "./layout/Shell.jsx";
 import { href, Link, Router, useRoute } from "./lib/router.jsx";
 import { SessionProvider, useSession } from "./lib/session.jsx";
@@ -7,6 +9,7 @@ import Login from "./routes/Login.jsx";
 import Model from "./routes/Model.jsx";
 import Project from "./routes/Project.jsx";
 import Workspace from "./routes/Workspace.jsx";
+import { Empty } from "./ui/Callout.jsx";
 import { Card, CardHeader } from "./ui/Card.jsx";
 
 /**
@@ -55,6 +58,13 @@ function Authenticated({ children }) {
   return isSignedIn ? children : <Login />;
 }
 
+/**
+ * CodeMirror is ~370 KB, and only one route uses it. Loaded eagerly it more
+ * than doubled the bundle every visitor downloads, including the login page,
+ * to carry an editor most sessions never open.
+ */
+const Transform = lazy(() => import("./routes/Transform.jsx"));
+
 function Route() {
   const route = useRoute();
 
@@ -72,9 +82,31 @@ function Route() {
       return <Benchmark id={route.params.id} />;
     case "model":
       return <Model code={route.params.code} />;
+    case "transform":
+      return (
+        <Suspense fallback={<EditorLoading />}>
+          <Transform />
+        </Suspense>
+      );
     default:
       return <NotFound path={route.path} />;
   }
+}
+
+/** Shown while the editor chunk downloads. Sits in the same shell so the
+ * page does not jump when it arrives. */
+function EditorLoading() {
+  return (
+    <>
+      <LeftRail width={258} />
+      <Centre>
+        <Card>
+          <Empty>Loading the editor…</Empty>
+        </Card>
+      </Centre>
+      <RightRail width={300} />
+    </>
+  );
 }
 
 function NotFound({ path }) {

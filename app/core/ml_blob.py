@@ -79,6 +79,23 @@ def exists(code: str) -> bool:
     return hit is not None
 
 
+def path_of(code: str) -> str | None:
+    """The model's concept path, as the UI writes it: /ML/Foo/bar.
+
+    Stored backslash-delimited and wrapped in separators. Anything writing the
+    blob back needs this, because the ETL's update endpoint addresses a concept
+    by path rather than by code.
+    """
+    check_code(code)
+    raw = scalar(
+        f"SELECT concept_path FROM {settings.db_schema}.concept_dimension "
+        f"WHERE concept_cd = '{code}';"
+    )
+    if not raw:
+        return None
+    return "/" + raw.strip("\\").replace("\\", "/")
+
+
 def is_built(code: str) -> bool:
     check_code(code)
     hit = scalar(

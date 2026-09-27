@@ -219,3 +219,193 @@ def test_columns_the_build_cannot_read_are_empty_in_the_plan(described):
     for c in described["columns"]:
         if c["empty_in_build"]:
             assert by_name[c["code"]]["kind"] == "empty", c["code"]
+
+
+# --------------------------------------------------------------------------
+# storing a transform, against the real ETL
+#
+# A mock passes every one of these while the real thing corrupts the payload,
+# because the corruption happens container-side: the blob is read back with an
+# unconditional `blob.replace("'", '"')` before `json.loads`.
+
+SCRATCH_CODE = "ztransformtest"
+SCRATCH_PATH = "/ML/_test/ztransformtest"
+
+HOSTILE = (
+    "def transform(df):\n"
+    "    # a researcher's comment with an apostrophe\n"
+    '    label = "double \\"quoted\\" text"\n'
+    "    win = 'C:\\Users\\x'\n"
+    "    note = 'na\u00efve \u00b5g/dL \u2014 caf\u00e9'\n"
+    "    return df.assign(ratio=df.iloc[:, 0] / 1.0)\n"
+)
+
+
+@pytest.fixture
+def scratch(warehouse):
+    """A throwaway model concept, removed however the test ends."""
+    from app.core import etl_api, ml_blob
+
+    coded = "\\" + SCRATCH_PATH.strip("/").replace("/", "\\") + "\\"
+
+    def drop():
+        try:
+            etl_api.delete("/etl/concepts", params={"cpath": coded})
+        except Exception:
+            pass
+
+    drop()
+    try:
+        etl_api.post("/etl/concepts", json={
+            "code": SCRATCH_CODE, "path": SCRATCH_PATH, "type": "assertion",
+            "description": "scratch concept for transform round-trip tests",
+            "blob": {"positive_patient_set": ["a"], "negative_patient_set": ["b"],
+                     "data_paths": ["/HeartDisease"],
+                     "label_paths": ["/HeartDisease/target"],
+                     "model_type": "logistic", "hyperparameters": {}},
+        })
+    except Exception as e:
+        pytest.skip(f"cannot create a scratch concept: {type(e).__name__}")
+
+    if not ml_blob.exists(SCRATCH_CODE):
+        drop()
+        pytest.skip("the ETL accepted the create but nothing was stored")
+
+    yield SCRATCH_CODE, SCRATCH_PATH
+    drop()
+
+
+def test_a_hostile_transform_round_trips_byte_for_byte(scratch):
+    """Apostrophes, double quotes, backslashes, newlines and non-ASCII, through
+    the real update path and back out of Postgres."""
+    from app.core import transform_store as ts
+
+    code, path = scratch
+    saved = ts.save(code, path, HOSTILE, author="tester")
+    back = ts.load(code)
+
+    assert back["source"] == HOSTILE
+    assert back["sha256"] == saved["sha256"]
+    assert back["intact"] is True
+
+
+def test_the_containers_own_repair_still_parses_the_blob(scratch):
+    """The decisive check. `BaseEngine.py:53` does
+    `json.loads(blob.replace("'", '"'))`, and that is what a build will do to
+    this row. If it cannot parse, the build dies naming a character offset."""
+    import json
+
+    from app.core import transform_store as ts
+    from app.core.config import settings
+    from app.core.db import scalar
+
+    code, path = scratch
+    saved = ts.save(code, path, HOSTILE, author="tester")
+
+    raw = scalar(f"SELECT concept_blob FROM {settings.db_schema}.concept_dimension "
+                 f"WHERE concept_cd = '{code}';")
+    repaired = json.loads(raw.replace("'", '"'))
+
+    assert repaired[ts.SHA] == saved["sha256"]
+    assert ts.decode(repaired)["source"] == HOSTILE
+
+
+def test_storing_the_source_unencoded_would_corrupt_the_blob(scratch):
+    """Why base64 is required rather than cautious.
+
+    One apostrophe in a comment is enough: the quote swap turns it into a `"`
+    in the middle of a JSON string and the parse fails. Asserting the failure
+    keeps the justification honest - if this ever stops failing, the encoding
+    could be reconsidered.
+    """
+    import json
+
+    from app.core import etl_api, ml_blob
+    from app.core.config import settings
+    from app.core.db import scalar
+
+    code, path = scratch
+    blob = ml_blob.load_blob_light(code)
+    blob["transform_source_raw"] = "def transform(df):\n    # it's a comment\n    return df\n"
+    etl_api.put("/etl/concepts", params={
+        "cpath": "\\" + path.strip("/").replace("/", "\\") + "\\",
+        "blob": json.dumps(blob),
+    })
+
+    raw = scalar(f"SELECT concept_blob FROM {settings.db_schema}.concept_dimension "
+                 f"WHERE concept_cd = '{code}';")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(raw.replace("'", '"'))
+
+
+def test_a_config_save_keeps_the_transform(scratch):
+    """The silent-deletion case, end to end: ModelForm rebuilds the blob from
+    scratch and this endpoint writes it whole."""
+    import json
+
+    from app.core import etl_api, ml_blob
+    from app.core import transform_store as ts
+
+    code, path = scratch
+    ts.save(code, path, HOSTILE, author="tester")
+
+    fresh = {"positive_patient_set": ["a"], "negative_patient_set": ["b"],
+             "data_paths": ["/HeartDisease"], "label_paths": ["/HeartDisease/target"],
+             "model_type": "random_forest", "hyperparameters": {}}
+    carried = ts.carry_forward(dict(fresh), ml_blob.load_blob_light(code))
+    etl_api.put("/etl/concepts", params={
+        "cpath": "\\" + path.strip("/").replace("/", "\\") + "\\",
+        "blob": json.dumps(carried),
+    })
+
+    assert ml_blob.load_blob_light(code)["model_type"] == "random_forest"
+    assert ts.load(code)["source"] == HOSTILE
+
+
+def test_a_config_save_without_the_carry_forward_destroys_it(scratch):
+    """The bug the carry-forward exists to prevent, asserted so the protection
+    cannot be removed as redundant."""
+    import json
+
+    from app.core import etl_api
+    from app.core import transform_store as ts
+
+    code, path = scratch
+    ts.save(code, path, HOSTILE, author="tester")
+
+    etl_api.put("/etl/concepts", params={
+        "cpath": "\\" + path.strip("/").replace("/", "\\") + "\\",
+        "blob": json.dumps({"model_type": "random_forest",
+                            "data_paths": ["/HeartDisease"]}),
+    })
+    assert ts.load(code) is None
+
+
+def test_clearing_a_transform_removes_every_key(scratch):
+    from app.core import ml_blob
+    from app.core import transform_store as ts
+
+    code, path = scratch
+    ts.save(code, path, HOSTILE, author="tester")
+    ts.clear(code, path)
+
+    assert ts.load(code) is None
+    remaining = set(ts.KEYS) & set(ml_blob.load_blob_light(code))
+    assert not remaining, f"left behind: {remaining}"
+
+
+def test_the_update_path_refuses_an_oversized_blob_with_a_sentence(scratch):
+    """Measured: 64 KB of source is HTTP 414. The raw failure is an HTML error
+    page, so it is turned into something a researcher can act on."""
+    from app.core import transform_store as ts
+
+    code, path = scratch
+    original = ts.MAX_SOURCE_BYTES
+    ts.MAX_SOURCE_BYTES = 1024 * 1024          # bypass the local bound only
+    try:
+        with pytest.raises(ts.TransformError) as e:
+            ts.save(code, path, "def transform(df):\n    return df\n# "
+                    + "x" * (200 * 1024) + "\n")
+        assert "too large" in str(e.value) and "URL" in str(e.value)
+    finally:
+        ts.MAX_SOURCE_BYTES = original

@@ -32,6 +32,7 @@ from app.api import (
     predictions,
     quality,
     transform,
+    transform_crud,
     watcher,
 )
 
@@ -75,6 +76,9 @@ api_router.include_router(dictionary.router, tags=["dictionary"])
 # from that same suppressed dictionary. The real-data path is not here and
 # will not be: it runs inside the ETL container, behind the job queue.
 api_router.include_router(transform.router, tags=["transform"])
+# Reading a transform is metadata; saving one is gated per model by the
+# handler, the same way model config is.
+api_router.include_router(transform_crud.router, tags=["transform"])
 api_router.include_router(loader.router, tags=["load"])          # verify-load
 api_router.include_router(cohorts.router, tags=["cohorts"])      # reads
 api_router.include_router(ml_models.router, tags=["ml-concepts"])  # reads

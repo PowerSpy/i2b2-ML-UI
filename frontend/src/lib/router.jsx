@@ -21,6 +21,7 @@ const PATTERNS = [
   { name: "project", pattern: "/project/:id" },
   { name: "project-benchmark", pattern: "/project/:id/benchmark" },
   { name: "model", pattern: "/model/:code" },
+  { name: "transform", pattern: "/model/:code/transform" },
 ];
 
 function segments(path) {
