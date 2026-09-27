@@ -61,47 +61,60 @@ export default function CohortPicker({
   );
 }
 
+/**
+ * A dropdown that adds cohorts, with the picks listed beneath as removable
+ * chips. Warehouses carry far too many cohorts for a row of toggles.
+ */
 export function CohortMultiPicker({ labelledBy, cohorts, values, onChange }) {
-  function toggle(name) {
-    onChange(
-      values.includes(name) ? values.filter((v) => v !== name) : [...values, name],
-    );
-  }
-
   if (!cohorts.length) {
     return <p className="text-[12px] text-text-muted">no cohorts yet</p>;
   }
 
   const chosen = cohorts.filter((c) => values.includes(c.name));
+  const available = cohorts.filter((c) => !values.includes(c.name));
 
   return (
     <div className="space-y-2">
-      {/* A set of toggles, not a single control, so it is a labelled group
-          rather than something a <label for> could point at. */}
-      <div className="flex flex-wrap gap-2" role="group" aria-labelledby={labelledBy}>
-        {cohorts.map((c) => {
-          const on = values.includes(c.name);
-          return (
-            <button
-              key={c.id}
-              type="button"
-              aria-pressed={on}
-              onClick={() => toggle(c.name)}
-              className={`min-h-[44px] rounded-btn border px-3 text-left text-[12px] transition-colors ${
-                on
-                  ? "border-accent bg-accent/10 text-text"
-                  : "border-border-strong text-text-3 hover:border-text-muted hover:text-text-2"
-              }`}
-            >
-              <Mono>{c.name}</Mono>{" "}
-              <Num className="text-text-muted">{label(c)}</Num>
-              {(c.stale || c.duplicate) && (
-                <span className="ml-1.5 text-warn">!</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <select
+        aria-labelledby={labelledBy}
+        // Always reset to the prompt, so the control reads as "add another".
+        value=""
+        onChange={(e) => e.target.value && onChange([...values, e.target.value])}
+        disabled={!available.length}
+        className={SELECT}
+      >
+        <option value="">
+          {available.length ? "— add a cohort —" : "— every cohort is added —"}
+        </option>
+        {available.map((c) => (
+          <option key={c.id} value={c.name}>
+            {c.name} ({label(c)}){suffix(c)}
+          </option>
+        ))}
+      </select>
+      {chosen.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {chosen.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((v) => v !== c.name))}
+                aria-label={`remove ${c.name}`}
+                className="min-h-[44px] rounded-btn border border-accent bg-accent/10 px-3 text-left text-[12px] text-text transition-colors hover:border-danger"
+              >
+                <Mono>{c.name}</Mono>{" "}
+                <Num className="text-text-muted">{label(c)}</Num>
+                {(c.stale || c.duplicate) && (
+                  <span className="ml-1.5 text-warn">!</span>
+                )}
+                <span aria-hidden="true" className="ml-2 text-text-muted">
+                  ×
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <Notes cohorts={chosen} />
     </div>
   );

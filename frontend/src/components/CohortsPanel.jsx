@@ -10,6 +10,10 @@ import { Mono, Num } from "../ui/Text.jsx";
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
+// A model needs one cohort per class plus one to score, built in this order,
+// so the name field is prefilled with the first of these not yet taken.
+const SUGGESTED_NAMES = ["positive_cases", "negative_cases", "target_cases"];
+
 const FIELD =
   "min-h-[44px] w-full rounded-btn border border-border-strong bg-panel-sunk px-3 text-[13px] text-text placeholder:text-text-muted";
 
@@ -131,11 +135,18 @@ function Definition({ def }) {
 
 /** The table plus the controls that change it. */
 export default function CohortsPanel({ cohorts, concepts, definitions, onChange, loading = false }) {
-  const [name, setName] = useState("");
+  // null until the user types, so the field tracks the suggestion instead.
+  const [typed, setTyped] = useState(null);
+  // Names created here, so the suggestion advances before the list refetches.
+  const [created, setCreated] = useState([]);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [wipeArmed, setWipeArmed] = useState(false);
+
+  const taken = new Set([...cohorts.map((c) => c.name), ...created]);
+  const suggested = SUGGESTED_NAMES.find((n) => !taken.has(n)) ?? "";
+  const name = typed ?? suggested;
 
   const duplicate = cohorts.some((c) => c.name === name);
   const validName = NAME_RE.test(name);
@@ -157,7 +168,8 @@ export default function CohortsPanel({ cohorts, concepts, definitions, onChange,
   const create = () =>
     run(async () => {
       await apiPost("/cohorts", { name, concept_code: code });
-      setName("");
+      setCreated((prev) => [...prev, name]);
+      setTyped(null);
     });
 
   const remove = (id) => run(() => apiDelete(`/cohorts/${id}`));
@@ -203,7 +215,7 @@ export default function CohortsPanel({ cohorts, concepts, definitions, onChange,
             <input
               id="cohort-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setTyped(e.target.value)}
               placeholder="positive_cases"
               className={`${FIELD} font-mono`}
             />
