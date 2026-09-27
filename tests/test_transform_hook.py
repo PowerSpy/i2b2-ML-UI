@@ -234,3 +234,54 @@ def test_warnings_are_stripped_of_quotes(tmp_path, monkeypatch):
     assert "warnings" not in report
     for w in report["transform_warnings"]:
         assert "'" not in w and '"' not in w
+
+
+# --------------------------------------------------------------------------
+# two writers, two keys
+
+
+def build_script() -> str:
+    return (Path(__file__).resolve().parents[1] / "docker-changes" / "i2b2_cdi"
+            / "ML" / "apply_build_model_ml.py").read_text(encoding="utf-8")
+
+
+def test_the_build_stamps_a_key_the_editor_does_not_write():
+    """The apply guard is worthless if both sides write the same key.
+
+    `transform_store.save()` writes `transform_sha256` on every save. If the
+    build stamped that key too, the apply branch would compare the stored
+    source against itself, always agree, and never refuse - which is what it
+    did until a live apply proved it. A model built with transform A and
+    applied with B would have scored every patient off a zero column and
+    returned success.
+
+    Asserted against the source because the build script cannot be imported
+    here, and because the failure mode is somebody tidying two similar names
+    into one.
+    """
+    from app.core import transform_store as ts
+
+    source = build_script()
+
+    assert "model_transform_sha256" in source
+    assert ts.SHA == "transform_sha256"
+    assert "model_transform_sha256" not in ts.KEYS, (
+        "the editor must not write the key the build stamps, or the apply "
+        "guard compares a value with itself")
+
+
+def test_the_apply_branch_compares_the_two_different_keys():
+    source = build_script()
+
+    assert "trained_sha = concept_blob.get('model_transform_sha256')" in source
+    assert "applied_sha = transform_report.get('transform_sha256')" in source
+
+
+def test_the_apply_branch_raises_rather_than_filling_zeros():
+    """Stock behaviour fills any absent trained feature with zeros and returns
+    success. On a transform mismatch that is every engineered column."""
+    source = build_script()
+    guard = source[source.index("trained_sha ="):source.index("print(X.columns.to_list())")]
+
+    assert "raise RuntimeError" in guard
+    assert "TRANSFORM FAILED" in guard

@@ -354,10 +354,15 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
         # passed to save_model_in_concept_blob, and anything written to `blob`
         # here is discarded when this function returns.
         #
-        # transform_sha256 is what ties a trained model to the exact code that
-        # produced its features. The apply path below refuses to score with a
-        # different one, and without this stamp it could not tell.
-        metrics.update(transform_report)
+        # The sha is stamped under **model_transform_sha256**, not
+        # `transform_sha256`. That distinction is the whole guard: the editor
+        # writes `transform_sha256` every time a transform is saved, so if the
+        # build stamped the same key, the apply branch below would be
+        # comparing the stored source against itself and could never report a
+        # mismatch. Two writers, two keys.
+        _report = dict(transform_report)
+        _report['model_transform_sha256'] = _report.pop('transform_sha256', None)
+        metrics.update(_report)
 
         save_model_in_concept_blob(ml_code,params,metrics,selected_features,prediction_pipeline)
         return 'saved model'
@@ -377,7 +382,12 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
         #
         # This is the single most dangerous silent failure in the feature, so
         # it refuses rather than warns.
-        trained_sha = concept_blob.get('transform_sha256')
+        # What the model was trained with, against what just ran. These are
+        # deliberately different keys - see the stamp in the build branch
+        # above. `transform_sha256` is the *editor's* key and is rewritten on
+        # every save, so comparing it here would compare the stored source
+        # with itself and always agree.
+        trained_sha = concept_blob.get('model_transform_sha256')
         applied_sha = transform_report.get('transform_sha256')
         if trained_sha != applied_sha:
             raise RuntimeError(
