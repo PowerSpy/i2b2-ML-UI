@@ -1,11 +1,5 @@
-# Pinned to the versions 'i2b2-etl' DECLARES in its requirements.txt.
-#
-# It does not have them installed, so it cannot currently run a
-# model build and these pins have not been observed running
-# anything. Re-probe once the container's dependencies are
-# installed - until then the dev loop's promise that behaviour
-# here predicts behaviour there is unverified.
-# Written by sandbox/build.sh probe on 2026-09-27T17:59:03Z.
+# Pinned to the libraries installed in the 'i2b2-etl' container.
+# Written by sandbox/build.sh probe on 2026-09-27T19:49:09Z.
 #
 # Do not hand-edit. Re-probe after any change to the ETL image:
 #     ./sandbox/build.sh probe
@@ -14,7 +8,7 @@
 # whole point of the dev loop is that behaviour here predicts
 # behaviour there, and a version skew silently ends that.
 
-pandas==2.3.0
+pandas==2.3.3
 numpy==1.26.4
 scikit-learn==1.3.2
 scipy==1.14.1

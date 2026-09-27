@@ -37,19 +37,48 @@ require_docker() {
         Start the i2b2 stack and try again."
 }
 
-# Ask the ETL container's own interpreter. Parsing a Dockerfile or a lockfile
-# would describe what was intended; this describes what is installed, which is
-# the thing that actually runs the model.
+# The interpreter the build actually runs under.
+#
+# **Not `python3`.** The container's start command is
+# `source /usr/src/app/.venv/bin/activate && ... python -m i2b2_cdi...`, so the
+# model is trained by the venv. The system python3 has none of these libraries,
+# and asking it reported every package MISSING while the venv was sitting there
+# fully populated - and then, once that was papered over, reported a version
+# match that did not exist. A probe pointed at the wrong interpreter is worse
+# than no probe, because it answers confidently.
+#
+# Override with ETL_PYTHON if the layout changes.
+ETL_PYTHON_CANDIDATES="${ETL_PYTHON:-} /usr/src/app/.venv/bin/python python3"
+
+etl_python() {
+  local c
+  for c in $ETL_PYTHON_CANDIDATES; do
+    [ -n "$c" ] || continue
+    if docker exec "$ETL" sh -c "command -v '$c' >/dev/null 2>&1 || [ -x '$c' ]"; then
+      echo "$c"
+      return 0
+    fi
+  done
+  die "no usable python inside '$ETL'. Tried: $ETL_PYTHON_CANDIDATES"
+}
+
+# Describes what is *installed*, not what a requirements file intended. On this
+# container the two differ: requirements.txt declares pandas==2.3.0 and the
+# venv runs 2.3.3.
 probe_versions() {
-  docker exec "$ETL" python3 -c '
+  local py; py="$(etl_python)"
+  echo "interpreter=$py"
+  # Quoted heredoc via the container's shell: a bare `docker exec ... /usr/...`
+  # argument gets rewritten to a host path by Git Bash on Windows.
+  docker exec "$ETL" sh -c "'$py' -c '
 import importlib.metadata as m, sys
-print("python=%d.%d" % sys.version_info[:2])
-for p in ("pandas", "numpy", "scikit-learn", "scipy"):
+print(\"python=%d.%d\" % sys.version_info[:2])
+for p in (\"pandas\", \"numpy\", \"scikit-learn\", \"scipy\"):
     try:
-        print("%s=%s" % (p, m.version(p)))
+        print(\"%s=%s\" % (p, m.version(p)))
     except Exception:
-        print("%s=MISSING" % p)
-' 2>/dev/null || die "could not run python3 inside '$ETL'."
+        print(\"%s=MISSING\" % p)
+'" 2>/dev/null || die "could not run '$py' inside '$ETL'."
 }
 
 cmd_probe() {
@@ -60,13 +89,17 @@ cmd_probe() {
 
   py="$(echo "$out" | sed -n 's/^python=//p')"
   [ -n "$py" ] || die "no python version came back from '$ETL'."
+  echo "build.sh: probed $(echo "$out" | sed -n 's/^interpreter=//p')" >&2
 
-  # Nothing installed is not the same as nothing declared. This container
-  # ships /usr/src/app/requirements.txt with exact pins and none of them
-  # installed, which means it cannot run a build at all - a finding about the
-  # container, not a reason to stop. Fall back to the declared pins so the dry
-  # run works, and record that they are declared rather than observed so
-  # `verify` never claims a match it has not seen.
+  # Nothing installed is not the same as nothing declared. If the interpreter
+  # genuinely has no ML libraries, fall back to the pins the container declares
+  # so the dry run still works - but record that they are *declared*, so
+  # `verify` can never claim a match it has not observed.
+  #
+  # Reaching this branch is now itself a warning sign: it usually means the
+  # probe found the wrong interpreter rather than that the container is
+  # broken. The declared pins are not reliable either - this container
+  # declares pandas==2.3.0 and its venv runs 2.3.3.
   local source="installed"
   for p in "${PACKAGES[@]}"; do
     if [ "$(echo "$out" | sed -n "s/^${p}=//p")" = "MISSING" ]; then

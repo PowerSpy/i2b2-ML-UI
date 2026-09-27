@@ -161,14 +161,30 @@ guard, the generator, the transform call, the validator and the fd-1
 redirection. `tests/test_sandbox_args.py` asserts the flags are *passed*;
 `test_live_sandbox.py` asserts they *work*.
 
-## Still unverified
+## Probe the venv, not `python3`
 
-**The version pin is a claim, not an observation.** The ETL container declares
-`pandas==2.3.0`, `numpy==1.26.4`, `scikit-learn==1.3.2`, `scipy==1.14.1` in
-`/usr/src/app/requirements.txt` and **has none of them installed** — it cannot
-currently run a model build at all. `build.sh` falls back to the declared pins,
-records `declared` in `.pin-source`, and `verify` refuses to claim a match it
-has not seen. Re-probe once the container's dependencies are installed.
+The ETL container starts with `source /usr/src/app/.venv/bin/activate`, so
+**the venv is what trains the model.** The system `python3` has none of these
+libraries.
+
+This is worth spelling out because getting it wrong is quiet. Probing `python3`
+reported every package missing, which looked like "the container is broken";
+handling that by falling back to `/usr/src/app/requirements.txt` then reported
+a version match that did not exist, because that file has drifted from the
+venv:
+
+| package | `requirements.txt` declares | the venv runs |
+|---|---|---|
+| pandas | 2.3.0 | **2.3.3** |
+| imbalanced-learn | 0.13.0 | **0.14.2** |
+| xgboost | 3.0.2 | **3.3.0** |
+
+A probe pointed at the wrong interpreter is worse than no probe, because it
+answers confidently. `build.sh` now prints which interpreter it used, and
+`test_live_sandbox.py` compares the sandbox image against the venv directly —
+a check neither mistake can fool. Override the search order with `ETL_PYTHON`.
+
+## Still unverified
 
 **Nothing here has run against real data**, because the real path does not
 exist yet. See *Status*.

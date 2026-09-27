@@ -196,3 +196,78 @@ def test_containers_are_removed_even_when_the_transform_is_killed(box, plan):
     run(box, plan, "def transform(df):\n    return df.assign(x=1.0)\n")
 
     assert not (set(sandbox_containers()) - before), "a sandbox container leaked"
+
+
+# --------------------------------------------------------------------------
+# the version match, against the interpreter that really runs the build
+
+
+def _versions(argv, timeout=120):
+    import json
+    import subprocess
+
+    probe = (
+        "import importlib.metadata as m, json;"
+        "print(json.dumps({p: m.version(p) for p in "
+        "('pandas','numpy','scikit-learn','scipy')}))"
+    )
+    p = subprocess.run(argv + [probe], capture_output=True, text=True,
+                       timeout=timeout)
+    if p.returncode != 0:
+        pytest.skip(f"probe failed: {(p.stderr or '').strip()[:150]}")
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def test_the_sandbox_matches_the_interpreter_that_trains_the_model(box):
+    """The dev loop's whole promise, asserted end to end.
+
+    The container is started with `source /usr/src/app/.venv/bin/activate`, so
+    the venv is what trains the model - **not** the system python3, which has
+    none of these libraries. A probe pointed at python3 reported every package
+    missing, then, once that was handled, reported a version match that did not
+    exist: requirements.txt declares pandas==2.3.0 and the venv runs 2.3.3.
+
+    Comparing the two directly cannot be fooled by either mistake.
+    """
+    from app.core.config import settings
+
+    etl = _versions(["docker", "exec", settings.container,
+                     "/usr/src/app/.venv/bin/python", "-c"])
+    sand = _versions(["docker", "run", "--rm", "--entrypoint", "python",
+                      box.IMAGE, "-c"])
+
+    assert sand == etl, (
+        f"sandbox {sand} does not match the ETL venv {etl}. Re-run "
+        "./sandbox/build.sh probe && ./sandbox/build.sh")
+
+
+def test_the_declared_requirements_are_not_trusted_as_the_pin():
+    """`/usr/src/app/requirements.txt` has drifted from the venv. Pinning to it
+    would look right and be wrong, which is why build.sh probes the installed
+    versions and records whether it managed to."""
+    import subprocess
+
+    from app.core.config import settings
+
+    p = subprocess.run(
+        ["docker", "exec", settings.container, "sh", "-c",
+         "grep -iE '^(pandas|imbalanced-learn|xgboost)==' /usr/src/app/requirements.txt"],
+        capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        pytest.skip("no requirements.txt in the container")
+
+    declared = dict(line.split("==") for line in p.stdout.split())
+    installed = _versions(["docker", "exec", settings.container,
+                           "/usr/src/app/.venv/bin/python", "-c"])
+
+    # Not an assertion that they differ - that would break when someone fixes
+    # the container. An assertion that the pin followed the *installed* one.
+    from pathlib import Path
+    req = Path(__file__).resolve().parents[1] / "sandbox" / "requirements.txt"
+    pinned = dict(
+        line.split("==") for line in req.read_text().split()
+        if "==" in line and not line.startswith("#"))
+
+    assert pinned["pandas"] == installed["pandas"], (
+        f"pinned {pinned['pandas']}, venv has {installed['pandas']}, "
+        f"requirements.txt declares {declared.get('pandas')}")
