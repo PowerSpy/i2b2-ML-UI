@@ -285,3 +285,23 @@ def test_the_apply_branch_raises_rather_than_filling_zeros():
 
     assert "raise RuntimeError" in guard
     assert "TRANSFORM FAILED" in guard
+
+
+def test_the_container_validator_matches_its_source():
+    """`docker-changes/.../transform_validate.py` is a copy that apply.sh makes
+    from `sandbox/runner/validate.py`.
+
+    It is tracked rather than ignored because docker-changes/ exists to record
+    what the running container actually holds. The cost of that is drift: two
+    files, one of them editable, and the way they would drift is one side
+    accepting a frame the other rejects - the sandbox passing something the
+    build then refuses, or worse, the reverse.
+    """
+    root = Path(__file__).resolve().parents[1]
+    source = root / "sandbox" / "runner" / "validate.py"
+    copied = root / "docker-changes" / "i2b2_cdi" / "ML" / "transform_validate.py"
+
+    assert copied.exists(), "run ./docker-changes/apply.sh to regenerate the copy"
+    assert copied.read_text(encoding="utf-8") == source.read_text(encoding="utf-8"), (
+        "the container's validator has drifted from sandbox/runner/validate.py - "
+        "edit the source and re-run ./docker-changes/apply.sh, never the copy")
