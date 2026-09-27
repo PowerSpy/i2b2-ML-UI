@@ -48,6 +48,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/cohorts/{cohort_id}/definition"): SESSION,
     ("GET", "/api/cohorts/{cohort_id}/size"): SESSION,
     ("GET", "/api/data-quality"): SESSION,
+    ("GET", "/api/data-dictionary"): SESSION,
+    ("GET", "/api/ml-concepts/{code}/data-dictionary"): SESSION,
     ("GET", "/api/ml-model-types"): SESSION,
     ("GET", "/api/ml-concepts"): SESSION,
     ("POST", "/api/ml-concepts"): OWNED,

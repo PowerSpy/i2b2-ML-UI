@@ -23,6 +23,31 @@ FACT_KEY = "patient_num, concept_cd, start_date, valtype_cd, tval_char, nval_num
 ROOT = r"split_part(trim(both '\' from c.concept_path), '\', 1)"
 
 
+def last_value_cte(where: str = "") -> str:
+    """One row per (patient, concept): the value a build would actually see.
+
+    The build pivots facts with `aggfunc='last'` after sorting ascending by
+    start_date (apply_build_model_ml.py:164), so the most recent observation
+    is the one that reaches the model. Statistics computed over *every* fact
+    describe a distribution nothing is ever trained on - and this warehouse
+    has 1.65 facts per patient per concept on average, so the two genuinely
+    differ.
+
+    `nval_num DESC NULLS LAST` is a tie-break pandas does not make. It only
+    bites when one patient has two facts for one code on the same date, which
+    is itself a data-quality finding rather than a normal reading; the
+    divergence is recorded here rather than papered over.
+    """
+    clause = f"WHERE {where} " if where else ""
+    return (
+        "SELECT DISTINCT ON (patient_num, concept_cd) "
+        "       patient_num, concept_cd, valtype_cd, nval_num, tval_char "
+        f"FROM {SCHEMA}.observation_fact "
+        f"{clause}"
+        "ORDER BY patient_num, concept_cd, start_date DESC, nval_num DESC NULLS LAST"
+    )
+
+
 def duplicate_facts() -> dict:
     """Total rows against distinct observations."""
     row = query(
@@ -55,7 +80,7 @@ def per_concept(limit: int = 500) -> list[dict]:
 # would multiply every fact whose code is declared twice: on the review
 # instance `age` sits under both /HeartDisease and /DiabetesSample, and the
 # per-dataset facts then summed to more than the table holds.
-_CODE_ROOT = (
+CODE_ROOT = (
     "SELECT concept_cd, min(root) AS root, count(*) AS roots "
     f"FROM (SELECT DISTINCT c.concept_cd, {ROOT} AS root "
     f"      FROM {SCHEMA}.concept_dimension c) t "
@@ -72,7 +97,7 @@ def per_dataset() -> list[dict]:
     rather than counted twice.
     """
     rows = query(
-        f"WITH code_root AS ({_CODE_ROOT}) "
+        f"WITH code_root AS ({CODE_ROOT}) "
         "SELECT CASE WHEN cr.roots > 1 THEN '' ELSE cr.root END AS root, "
         "       max(cr.roots) > 1 AS ambiguous, "
         "       count(*) AS facts, "
@@ -149,7 +174,7 @@ def patient_overlap() -> list[dict]:
     # by construction, which reported 1,197 shared patients on the review
     # instance purely because `age` was declared twice.
     rows = query(
-        f"WITH code_root AS ({_CODE_ROOT}), "
+        f"WITH code_root AS ({CODE_ROOT}), "
         "     pr AS (SELECT DISTINCT cr.root, f.patient_num "
         f"            FROM {SCHEMA}.observation_fact f "
         "            JOIN code_root cr ON cr.concept_cd = f.concept_cd "

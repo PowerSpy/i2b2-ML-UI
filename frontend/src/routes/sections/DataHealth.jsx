@@ -2,6 +2,7 @@ import DeleteButton from "../../components/DeleteButton.jsx";
 import { count, plural } from "../../lib/format.js";
 import { useWorkspace } from "../../lib/workspace.jsx";
 import DataHealthCard from "../../panels/DataHealthCard.jsx";
+import DataDictionary from "../../panels/DataDictionary.jsx";
 import DataQuality from "../../panels/DataQuality.jsx";
 import CustodianOnly from "../../ui/Restricted.jsx";
 import WatcherLog from "../../panels/WatcherLog.jsx";
@@ -33,6 +34,14 @@ export default function DataHealth() {
       {/* Section 3.6 of the clinical review: two totals cannot tell a healthy
           warehouse from a badly polluted one. */}
       <DataQuality refreshKey={version} />
+
+      {/* Aggregate shapes only. This is what makes it possible to write code
+          against data you are not allowed to look at. */}
+      <DataDictionary
+        endpoint="/data-dictionary"
+        title="Data dictionary"
+        hint="Column shapes across the warehouse: type, how often each is populated, and where its values sit. Every figure is an aggregate and anything describing too few patients is withheld."
+      />
 
       <Card>
         <CardHeader

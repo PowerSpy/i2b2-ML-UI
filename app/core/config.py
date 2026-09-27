@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     # never be sent over http://localhost.
     cookie_secure: bool = False
 
+    # Below this many patients, a count is withheld rather than shown. 11 is
+    # the CMS cell-size suppression threshold, chosen so there is a published
+    # rule to cite rather than a number we picked. Used by the data dictionary
+    # now and by the metric suppression later.
+    min_cell_size: int = 11
+
     app_db: Path = CONFIG_FILE.parent / "var" / "app.db"
     audit_dir: Path = CONFIG_FILE.parent / "var" / "audit"
     audit_enabled: bool = True

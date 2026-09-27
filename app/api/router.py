@@ -24,6 +24,7 @@ from app.api import (
     cohorts,
     concepts,
     delete,
+    dictionary,
     health,
     jobs,
     loader,
@@ -66,6 +67,9 @@ CUSTODIAN = [Depends(custodian_only)]
 api_router.include_router(concepts.router, tags=["concepts"])
 api_router.include_router(predictions.router, tags=["predictions"])
 api_router.include_router(quality.router, tags=["quality"])
+# Aggregate shapes only, already suppressed. It is what lets a researcher
+# write code against data they cannot see.
+api_router.include_router(dictionary.router, tags=["dictionary"])
 api_router.include_router(loader.router, tags=["load"])          # verify-load
 api_router.include_router(cohorts.router, tags=["cohorts"])      # reads
 api_router.include_router(ml_models.router, tags=["ml-concepts"])  # reads

@@ -7,6 +7,7 @@ import { count, plural, score, seconds } from "../lib/format.js";
 import { clfMismatch } from "../lib/projects.js";
 import { href, Link, navigate } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
+import DataDictionary from "../panels/DataDictionary.jsx";
 import PipelineRailStub from "../panels/PipelineRailStub.jsx";
 import Button from "../ui/Button.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
@@ -147,6 +148,14 @@ export default function Model({ code }) {
               <OtherPlots code={code} plots={plots} />
 
               <Features metrics={metrics} />
+
+              {/* Scoped to this model: its data paths minus its label paths,
+                  over its training cohorts - the frame a build assembles. */}
+              <DataDictionary
+                endpoint={`/ml-concepts/${encodeURIComponent(code)}/data-dictionary`}
+                title="Columns this model trains on"
+                hint="Resolved the same way the container resolves them, so this is the frame a build really sees rather than one that looks similar."
+              />
             </>
           )}
         </div>
