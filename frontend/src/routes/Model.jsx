@@ -14,7 +14,7 @@ import { Card, CardHeader } from "../ui/Card.jsx";
 import Callout, { Empty, Failed, NotReported } from "../ui/Callout.jsx";
 import { Pill, Status } from "../ui/Status.jsx";
 import { KeyValue, KeyValueList } from "../ui/Table.jsx";
-import { Heading, Mono, Note, Num, SectionLabel } from "../ui/Text.jsx";
+import { Heading, Mono, Note, Num, SectionLabel, Withheld } from "../ui/Text.jsx";
 
 export default function Model({ code }) {
   const ws = useWorkspace();
@@ -133,7 +133,12 @@ export default function Model({ code }) {
               </div>
 
               <div className="grid gap-3.5 lg:grid-cols-2">
-                <ConfusionMatrix counts={counts} atHalf={plots.data?.counts_at_half} note={plots.data?.note} />
+                <ConfusionMatrix
+                  counts={counts}
+                  suppressed={metrics?.suppressed ?? []}
+                  atHalf={plots.data?.counts_at_half}
+                  note={plots.data?.note}
+                />
                 <Card>
                   <SectionLabel className="mb-3">Performance by subgroup</SectionLabel>
                   <NotReported label="score by sex, age band or site">
@@ -249,7 +254,7 @@ function MetricStrip({ metrics, counts }) {
   );
 }
 
-function ConfusionMatrix({ counts, atHalf, note }) {
+function ConfusionMatrix({ counts, suppressed = [], atHalf, note }) {
   const cells = [
     { key: "true_negative", label: "true negative", tone: "text-text" },
     { key: "false_positive", label: "false positive", tone: "text-warn" },
@@ -258,12 +263,22 @@ function ConfusionMatrix({ counts, atHalf, note }) {
   ];
 
   const have = cells.some((c) => typeof counts[c.key] === "number");
+  // A withheld count and an absent one both arrive as null, and saying "this
+  // build stored no counts" about numbers that exist and are being protected
+  // would be simply untrue.
+  const withheld = cells.some((c) => suppressed.includes(c.key));
 
   return (
     <Card>
       <SectionLabel className="mb-3">Confusion matrix</SectionLabel>
 
-      {!have ? (
+      {withheld ? (
+        <Callout tone="warn" title="counts withheld">
+          One of these cells covers too few patients to publish, so the whole
+          matrix goes with it — a total and three cells give the fourth back by
+          subtraction. <Withheld className="ml-1" />
+        </Callout>
+      ) : !have ? (
         <NotReported label="counts at the reported threshold">
           This build stored no confusion counts. Only builds made since the
           metrics patch record them.

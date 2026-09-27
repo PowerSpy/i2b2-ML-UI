@@ -74,6 +74,12 @@ KEYS = (SOURCE, SHA, SAVED_AT, AUTHOR)
 # make this an order of magnitude smaller without warning.
 MAX_SOURCE_BYTES = 24 * 1024
 
+# Above this, a dropped connection is read as "the request line was too long"
+# rather than as a network problem. Comfortably above a normal blob and well
+# below the ~89 KB where this ETL starts refusing, so a genuine network blip on
+# a small payload still surfaces as itself.
+TOO_LONG_HINT_BYTES = 48 * 1024
+
 
 class TransformError(Exception):
     """A refusal with a sentence a researcher can act on."""
@@ -275,16 +281,26 @@ def _write(code: str, path: str, fields: dict, *, dropping: bool = False) -> Non
             "blob": payload,
         })
     except Exception as e:
-        # 414 is the one worth naming. `validate` bounds the transform, but the
-        # rest of the blob shares the same URL, so a model with many data paths
-        # or a large hyperparameter grid can cross the line on its own - and
-        # the raw error is an HTML error page, not a sentence.
-        if "414" in str(e):
+        # An over-long request line has two observed endings, and only one of
+        # them is an HTTP status: at ~89 KB this ETL answers 414, and at a few
+        # hundred KB it closes the connection without replying at all. Both
+        # mean the same thing and both arrive as something unreadable - an
+        # HTML error page or a RemoteDisconnected - so both get the sentence.
+        #
+        # `validate` bounds the transform itself, but the rest of the blob
+        # shares that URL, so a model with many data paths or a large
+        # hyperparameter grid can cross the line on its own.
+        dropped = any(
+            marker in type(e).__name__ or marker in str(e)
+            for marker in ("ConnectionError", "RemoteDisconnected",
+                           "Connection aborted")
+        )
+        if "414" in str(e) or (dropped and len(payload) > TOO_LONG_HINT_BYTES):
             raise TransformError(
                 f"the model's blob is too large to update ({len(payload)} "
-                "bytes). It travels in a URL, and this server refuses one that "
-                "long. Shorten the transform, or reduce the model's data paths "
-                "and hyperparameter grid."
+                "bytes). It travels in a URL, and this server will not accept "
+                "one that long. Shorten the transform, or reduce the model's "
+                "data paths and hyperparameter grid."
             ) from None
         raise
 

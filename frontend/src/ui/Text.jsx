@@ -55,3 +55,42 @@ export function Note({ children, className = "" }) {
     </p>
   );
 }
+
+/**
+ * A value that exists and is deliberately not shown.
+ *
+ * This has to look different from `format.js`'s em dash, which means "we do
+ * not have this number". The two are easy to conflate and mean opposite
+ * things: a dash says the app failed to fetch something, this says the app
+ * fetched it and chose not to publish it. Someone deciding whether a cohort is
+ * usable needs to know which they are looking at.
+ *
+ * Rendered as a bordered chip rather than styled text so it reads as a
+ * deliberate object on the page. The rule is one hover away via `title`,
+ * rather than living only in a document nobody has open.
+ */
+export function Withheld({ min = 11, reason, className = "" }) {
+  return (
+    <span
+      className={`inline-flex cursor-help items-center gap-1 rounded-btn border border-warn/40 bg-warn-edge/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-warn ${className}`}
+      title={reason ?? `Withheld: fewer than ${min} patients.`}
+    >
+      &lt;{min}
+    </span>
+  );
+}
+
+/**
+ * Text withheld for a reason other than a small count — an ETL traceback, a
+ * patient list. No threshold to quote, so it says what it is.
+ */
+export function NotShown({ reason, children = "not shown", className = "" }) {
+  return (
+    <span
+      className={`inline-flex cursor-help items-center rounded-btn border border-border-strong px-1.5 py-0.5 font-mono text-[10px] leading-none text-text-muted ${className}`}
+      title={reason ?? "Withheld from researcher accounts."}
+    >
+      {children}
+    </span>
+  );
+}

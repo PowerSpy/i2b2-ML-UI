@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import current_principal
-from app.core import audit, authz, cohorts, db, etl_api, ml_blob, spooler
+from app.core import (audit, authz, cohorts, db, etl_api, ml_blob, redact,
+                      spooler)
 from app.core.auth import Principal
 from app.core.config import settings
 
@@ -75,6 +76,11 @@ class Job(BaseModel):
     error_stack: str | None = None
     started_on: str | None = None
     completed_on: str | None = None
+    # Set when `output` or `error_stack` was withheld, so the UI can say the
+    # detail exists and is not being shown - rather than rendering a blank
+    # that reads as "this job said nothing".
+    suppressed: list[str] = []
+    suppression_note: str | None = None
 
 
 def _row_to_job(row: dict) -> Job:
@@ -205,15 +211,64 @@ def apply(body: Apply_In,
                    warnings=[_wipe_warning(body.path)])
 
 
+# The message a researcher gets instead of a stack trace. It has to be enough
+# to act on, which for a job means: what failed, and who can see why.
+TRACEBACK_WITHHELD = (
+    "This job's output is not shown to researcher accounts. ETL tracebacks "
+    "carry the failing SQL and sample rows from the data. A custodian can read "
+    "the full output."
+)
+
+# The one exception, and the reason for it: a transform failure is the
+# researcher's own code failing, and the message is written by this
+# application rather than by the ETL. Withholding it would leave someone
+# unable to debug the one thing they are responsible for.
+TRANSFORM_MARKER = "TRANSFORM FAILED:"
+
+
+def _redact_job(job: Job) -> Job:
+    """Withhold ETL output, keeping the part that is the caller's own.
+
+    This is the least obvious disclosure surface in the app. `error_stack`
+    carries Python tracebacks out of the ETL container, and those include the
+    SQL that failed and, when a load fails mid-row, the row - and `JobQueue.jsx`
+    polls this endpoint every ten seconds.
+    """
+    withheld = []
+    for field in ("output", "error_stack"):
+        value = getattr(job, field)
+        if not value:
+            continue
+        if TRANSFORM_MARKER in value:
+            # Sliced from the marker to the end of *that line*, not the whole
+            # line and not the rest of the text. A traceback that arrives on
+            # one line would otherwise carry the container's SQL along with
+            # the sentence this application wrote.
+            tail = value[value.index(TRANSFORM_MARKER):]
+            setattr(job, field, tail.splitlines()[0].strip())
+            continue
+        setattr(job, field, TRACEBACK_WITHHELD)
+        withheld.append(field)
+
+    job.suppressed = withheld
+    if withheld:
+        job.suppression_note = TRACEBACK_WITHHELD
+    return job
+
+
 @router.get("/jobs", response_model=list[Job])
 def list_jobs(
     limit: int = Query(20, ge=1, le=settings.max_job_rows),
+    principal: Principal = Depends(current_principal),
 ) -> list[Job]:
     rows = db.query(
         f"SELECT id, {', '.join(JOB_COLUMNS)} "
         f"FROM {settings.db_schema}.job ORDER BY id DESC LIMIT {int(limit)};"
     )
-    return [_row_to_job(r) for r in rows]
+    jobs = [_row_to_job(r) for r in rows]
+    if redact.applies_to(principal):
+        jobs = [_redact_job(j) for j in jobs]
+    return jobs
 
 
 @custodian_router.post("/jobs/{job_id}/reset", response_model=Job_Out)

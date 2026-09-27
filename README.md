@@ -161,3 +161,87 @@ cleaned up.
 
 Uploads are capped at 512 MB and both the host and container copies are deleted
 once the load finishes, however it finishes.
+
+## Researcher code execution, and what it does not protect against
+
+Researchers can write a Python `transform(df)` that engineers features for
+their own model. It runs in a container with `--network none`, no credentials,
+no host mounts and a read-only root. The claim is **no egress, not no data
+access**: on a real build the code sees every patient row it transforms, and
+what it cannot do is send those rows anywhere. Anyone approving a run should
+know which of those two they are being trusted with.
+
+`sandbox/README.md` covers the mechanism. What follows is what it does *not*
+close, because a control whose limits are not written down gets believed beyond
+them.
+
+**1. The output frame is an unclosed leak channel.** A transform can encode raw
+values into a column it returns. Those flow into the model, into
+`selected_features`, into `metrics`, and on the apply path into
+`observation_fact` as per-patient predictions. No sandbox fixes this — it is
+model inversion, and it is inherent to "your code produces the features the
+model trains on".
+
+What exists instead is traceability and containment: apply is gated,
+`transform_sha256` is stamped on every trained model so any prediction set
+leads back to the exact code that produced it, and no endpoint returns a row of
+the real transformed frame. That last one is an invariant with a test behind
+it, not a convention.
+
+**2. The import allowlist is ergonomics, not security.** `guard.py` rejects
+`import os`, and `pd.read_csv` opens a file without being an import. It is
+there so a `import requests` pasted from a notebook produces a clear sentence
+in a second instead of a confusing failure inside a container with no DNS.
+Treat a pass as "nothing obviously wrong", never as "this code is safe".
+
+**3. Differencing attacks are not prevented.** Cell-size suppression at k=11
+stops a single small count being published. It does nothing against someone who
+runs repeated builds over shifting cohorts and subtracts the results —
+k-anonymity has no answer to an adaptive querier. The audit log is the
+detection story here, not prevention. **A query budget is out of scope**, and
+saying so is more honest than implying the threshold covers it.
+
+**4. Suppression applies to researchers, not custodians.** A custodian loads
+the data and can delete it. Withholding a count of four orphan facts from the
+person whose job is to fix those four facts would make `/data-quality` useless
+for its only purpose while protecting nothing they cannot already read.
+
+**5. A transform build depends on this backend being up.** The ETL container
+spools the frame out and waits; if nothing answers, the build fails. It fails
+loudly and by name, and the job queue refuses at submission time rather than
+letting a job hang — but it is a new way for a build to fail that has nothing
+to do with the model.
+
+**6. The concept blob is the wrong long-term home for source code.** It already
+holds a pickled model and five base64 PNGs. Storing the transform there was the
+right call for now — no new storage, and it inherits an existing round trip
+that is now tested — but if transforms get used seriously the answer is a table
+or version-controlled files with the blob holding only a hash. Decide that
+before the blob grows a fourth kind of payload.
+
+**7. The docker-socket privilege is the dominant risk if this is ever exposed.**
+This process can `docker exec` into the i2b2 containers, which is
+root-equivalent on the host. On loopback that is an accepted risk. Publicly
+reachable it means any RCE in this process is host root, from the internet.
+That wants splitting before exposure: a public-facing API with no docker
+access, talking over loopback to a small privileged helper with a fixed command
+allowlist and no shell. Architectural, not a config flag.
+
+### Cell-size suppression
+
+k = 11, matching the CMS cell-size suppression policy — a published rule to
+point a reviewer at rather than a number we picked. Three rules, in
+`app/core/redact.py`:
+
+- **Suppressed is null, never zero.** "Two patients" and "no patients" must not
+  render identically, and a zero says the second confidently.
+- **Suppressed says so.** Every payload carries a `suppressed` list naming the
+  withheld fields, because a bare null is ambiguous between "small", "not
+  applicable" and "not loaded yet".
+- **Complementary suppression.** If one cell of a group goes, the whole group
+  goes including totals — `tn = n_samples - tp - fp - fn`, so publishing three
+  cells and a total publishes the fourth.
+
+The confusion-matrix *image* is withheld along with the counts, because
+`model_plots.py` draws the raw cell counts onto the heatmap. Redacting the
+numbers and serving that PNG would have been theatre.

@@ -409,3 +409,101 @@ def test_the_update_path_refuses_an_oversized_blob_with_a_sentence(scratch):
         assert "too large" in str(e.value) and "URL" in str(e.value)
     finally:
         ts.MAX_SOURCE_BYTES = original
+
+
+# --------------------------------------------------------------------------
+# suppression against real counts, through the real endpoints
+
+
+@pytest.fixture
+def as_researcher(warehouse, app_home):
+    """A signed-in researcher client."""
+    from fastapi.testclient import TestClient
+
+    from app.core import auth, passwords
+    from app.core.authz import Role
+    from app.main import app
+
+    password = "correct horse battery staple"
+    auth.create_user("boss", passwords.hash_password(password), Role.CUSTODIAN)
+    auth.create_user("rex", passwords.hash_password(password), Role.RESEARCHER)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    res = client.post("/api/auth/login", json={"username": "rex", "password": password})
+    assert res.status_code == 200, res.text
+    return client
+
+
+def test_a_researcher_never_receives_patient_numbers(as_researcher, warehouse):
+    """The one endpoint that returns identifiers, against real prediction
+    facts. Unconditional - a large cohort does not make a named positive
+    prediction less identifying."""
+    from app.core.db import query
+
+    rows = query(f"SELECT concept_cd AS code FROM {warehouse.SCHEMA}.observation_fact "
+                 "GROUP BY concept_cd ORDER BY count(*) DESC LIMIT 1;")
+    if not rows:
+        pytest.skip("no facts in this warehouse")
+
+    res = as_researcher.get(f"/api/predictions/{rows[0]['code']}?limit=50")
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    assert body["patients"] == []
+    assert "patients" in body["suppressed"]
+    assert "not shown to researcher accounts" in body["note"]
+
+
+def test_a_researcher_sees_no_etl_traceback(as_researcher):
+    """`error_stack` carries the failing SQL and, on a bad row, the row - and
+    the UI polls this every ten seconds."""
+    res = as_researcher.get("/api/jobs?limit=50")
+    if res.status_code != 200:
+        pytest.skip(f"job list unavailable: {res.status_code}")
+
+    for job in res.json():
+        for field in ("output", "error_stack"):
+            value = job.get(field)
+            if not value:
+                continue
+            if "TRANSFORM FAILED" in value:
+                continue
+            assert "Traceback" not in value, f"job {job['id']} leaked a traceback"
+            assert "observation_fact" not in value
+
+
+def test_no_small_count_survives_any_researcher_payload(as_researcher, warehouse):
+    """The recursive sweep, against numbers nobody chose, through the real
+    endpoints rather than against fabricated dicts."""
+    from app.core import redact
+
+    paths = ["/api/data-quality", "/api/cohorts", "/api/data-dictionary"]
+    offenders = []
+
+    for path in paths:
+        res = as_researcher.get(path)
+        if res.status_code != 200:
+            continue
+        payload = res.json()
+
+        def sweep(node, where):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    sweep(v, f"{where}.{k}")
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    sweep(v, f"{where}[{i}]")
+            elif isinstance(node, int) and not isinstance(node, bool):
+                # Not every integer is a count of people. Identifiers, the
+                # threshold itself, and `concepts` - which counts columns, not
+                # patients - are exempt by name rather than by being skipped
+                # silently, so the exemptions are reviewable.
+                if where.endswith((".id", ".roots", ".min_cell", ".other_count",
+                                   ".concepts")):
+                    return
+                if 0 < node < redact.MIN_CELL:
+                    offenders.append((where, node))
+
+        sweep(payload, path)
+
+    assert not offenders, f"counts below {redact.MIN_CELL} reached a researcher: {offenders}"

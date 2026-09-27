@@ -9,7 +9,7 @@ import Callout, { Empty, Failed } from "../ui/Callout.jsx";
 import Meter from "../ui/Meter.jsx";
 import { Pill } from "../ui/Status.jsx";
 import { Table, Td, Th } from "../ui/Table.jsx";
-import { Mono, Note, Num } from "../ui/Text.jsx";
+import { Mono, Note, Num, Withheld } from "../ui/Text.jsx";
 
 /**
  * The shape of the data, without a single patient row.
@@ -134,26 +134,6 @@ export default function DataDictionary({ endpoint, title, hint }) {
         )}
       </Callout>
     </Card>
-  );
-}
-
-/**
- * A withheld value, shown in place rather than left blank.
- *
- * Blank reads as "no data" and a dash reads as "not loaded yet". Neither is
- * what happened, and the difference matters: someone deciding whether a column
- * is usable needs to know it exists and is simply too sparse to describe.
- */
-function Withheld({ min, reason }) {
-  return (
-    <Pill
-      tone="warn"
-      className="cursor-help"
-      // title, so the rule is one hover away rather than only in a doc.
-      title={reason ?? `withheld: fewer than ${min} patients`}
-    >
-      &lt; {min}
-    </Pill>
   );
 }
 

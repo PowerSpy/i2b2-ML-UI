@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core import audit, cohorts
+from app.api.deps import current_principal
+from app.core import audit, cohorts, redact
+from app.core.auth import Principal
 
 router = APIRouter()
 
@@ -14,9 +16,11 @@ custodian_router = APIRouter()
 class Cohort(BaseModel):
     id: int
     name: str
-    size: int
+    # Nullable: a cohort of four people is four identifiable people, and a
+    # zero here would read as "empty" rather than "withheld".
+    size: int | None = None
     # Members that still have facts. Differs from `size` after a reload.
-    live: int = 0
+    live: int | None = 0
     stale: bool = False
     # Another patient set shares this name. The build engine unions same-named
     # sets rather than picking one, so this is a correctness problem, not cosmetic.
@@ -34,14 +38,30 @@ class Cohort_Delete(BaseModel):
 
 class Cohort_Size(BaseModel):
     id: int
-    size: int
-    live: int
+    size: int | None = None
+    live: int | None = None
     stale: bool
+    suppressed: list[str] = []
+    suppression_note: str | None = None
+
+
+def _redact_cohort(c: dict, hide: bool) -> dict:
+    """Sizes small enough to identify the members, withheld.
+
+    `stale` and `duplicate` survive deliberately. They are properties of the
+    cohort rather than counts of people, and they are exactly what a researcher
+    needs in order to not train a model on the wrong population.
+    """
+    if not hide:
+        return c
+    return {**c, "size": redact.count(c.get("size")),
+            "live": redact.count(c.get("live"))}
 
 
 @router.get("/cohorts", response_model=list[Cohort])
-def list_cohorts() -> list[Cohort]:
-    return [Cohort(**c) for c in cohorts.list_cohorts()]
+def list_cohorts(principal: Principal = Depends(current_principal)) -> list[Cohort]:
+    hide = redact.applies_to(principal)
+    return [Cohort(**_redact_cohort(c, hide)) for c in cohorts.list_cohorts()]
 
 
 @custodian_router.post("/cohorts", response_model=Cohort)
@@ -108,12 +128,16 @@ def cohort_definition(cohort_id: int) -> Cohort_Definition:
 
 
 @router.get("/cohorts/{cohort_id}/size", response_model=Cohort_Size)
-def cohort_size(cohort_id: int) -> Cohort_Size:
+def cohort_size(cohort_id: int,
+                principal: Principal = Depends(current_principal)) -> Cohort_Size:
     """Kept for callers that ask about one cohort; /cohorts now carries this
     for every row, so the UI no longer needs a request per cohort."""
     match = next((c for c in cohorts.list_cohorts() if c["id"] == cohort_id), None)
     if match is None:
         raise HTTPException(404, f"no cohort with id {cohort_id}")
 
-    return Cohort_Size(id=cohort_id, size=match["size"], live=match["live"],
-                       stale=match["stale"])
+    row = _redact_cohort(match, redact.applies_to(principal))
+    withheld = [k for k in ("size", "live") if row.get(k) is None]
+    return Cohort_Size(id=cohort_id, size=row["size"], live=row["live"],
+                       stale=match["stale"], suppressed=withheld,
+                       suppression_note=redact.reason(withheld))

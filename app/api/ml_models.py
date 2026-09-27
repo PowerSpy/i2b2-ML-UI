@@ -5,7 +5,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api.deps import current_principal
 from app.core import (audit, authz, cohorts, db, etl_api, ml_blob, ml_registry,
-                      transform_store)
+                      redact, transform_store)
 from app.core.auth import Principal
 from app.core.config import settings
 
@@ -156,7 +156,9 @@ class Ml_Concept_Deleted(BaseModel):
 class Metrics(BaseModel):
     headline: dict[str, float]
     thresholded: dict[str, float]
-    counts: dict[str, float]
+    # Nullable because a suppressed cell is null, never zero: a reader must
+    # not be able to tell two patients from none.
+    counts: dict[str, float | None]
     features: list[str]
     build_time_sec: float | None = None
     threshold_note: str
@@ -164,14 +166,20 @@ class Metrics(BaseModel):
     model_name: str | None = None
     clf_type: str | None = None
     hyperparameters: dict[str, list] = {}
+    # Names the figures that were withheld, so a null is never ambiguous
+    # between "too few patients", "not applicable" and "not loaded yet".
+    suppressed: list[str] = []
+    suppression_note: str | None = None
 
 
 class Plots(BaseModel):
     images: dict[str, str]
+    suppressed: list[str] = []
+    suppression_note: str | None = None
     # Counts drawn into the plots, which are computed at the 0.5 cutoff the
     # stored model predicts at - not at the F1-optimal threshold the headline
     # metrics use. The two disagree, so they are kept apart deliberately.
-    counts_at_half: dict[str, int] = {}
+    counts_at_half: dict[str, int | None] = {}
     note: str
 
 
@@ -388,7 +396,8 @@ def ml_concept_config(code: str) -> dict:
 
 
 @router.get("/ml-concepts/{code}/metrics", response_model=Metrics)
-def metrics(code: str) -> Metrics:
+def metrics(code: str,
+            principal: Principal = Depends(current_principal)) -> Metrics:
     try:
         # Trimmed: the metrics are ~1 KB of a blob that reaches 600 KB once the
         # serialized model and plot images are in it.
@@ -406,10 +415,20 @@ def metrics(code: str) -> Metrics:
     def pick(keys):
         return {k: blob[k] for k in keys if isinstance(blob.get(k), (int, float))}
 
+    raw_counts = pick(COUNTS)
+    suppressed: list[str] = []
+    if redact.applies_to(principal):
+        # The confusion cells and their totals go as one group. Suppressing a
+        # single small cell while publishing the others and n_samples gives it
+        # straight back by subtraction.
+        raw_counts, suppressed = redact.counts(raw_counts)
+
     return Metrics(
         headline=pick(HEADLINE),
         thresholded=pick(THRESHOLDED),
-        counts=pick(COUNTS),
+        counts=raw_counts,
+        suppressed=suppressed,
+        suppression_note=redact.reason(suppressed),
         features=blob.get("feature_column_codes", []),
         build_time_sec=blob.get("build_time_sec"),
         threshold_note=(
@@ -424,7 +443,8 @@ def metrics(code: str) -> Metrics:
 
 
 @router.get("/ml-concepts/{code}/plots", response_model=Plots)
-def plots(code: str) -> Plots:
+def plots(code: str,
+          principal: Principal = Depends(current_principal)) -> Plots:
     try:
         blob = ml_blob.load_blob(code)
     except KeyError as e:
@@ -440,9 +460,25 @@ def plots(code: str) -> Plots:
         for k in ("confusion_tp", "confusion_fp", "confusion_tn", "confusion_fn")
         if isinstance(blob.get(k), (int, float))
     }
+    images = ml_blob.plots(blob)
+    suppressed: list[str] = []
+    if redact.applies_to(principal):
+        counts, suppressed = redact.plot_counts(counts)
+        if suppressed:
+            # The confusion-matrix figure has the raw counts *drawn on it*
+            # (model_plots.py:103 - "heatmap with raw counts"). Redacting the
+            # numbers here and serving that PNG would disclose them anyway, so
+            # the image goes with them. The other figures are curves over the
+            # whole test set and carry no cell.
+            images = {k: v for k, v in images.items()
+                      if "confusion" not in k.lower()}
+            suppressed.append("plot_confusion_matrix")
+
     return Plots(
-        images=ml_blob.plots(blob),
+        images=images,
         counts_at_half=counts,
+        suppressed=sorted(set(suppressed)),
+        suppression_note=redact.reason(suppressed),
         note=(
             "Plots score the test set at the 0.5 cutoff the stored model predicts at, "
             "so these counts differ from the headline metrics, which use the F1-optimal "
