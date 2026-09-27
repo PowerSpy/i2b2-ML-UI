@@ -33,6 +33,14 @@ MAX_LOG_CHARS = 20000
 USER_FILENAME = "transform.py"
 
 
+def _timeout_s() -> int:
+    """The budget, from the environment the host sets on `docker run`."""
+    try:
+        return int(os.environ.get("SANDBOX_TIMEOUT_S", "0"))
+    except ValueError:
+        return 0
+
+
 def main() -> int:
     # Before anything else, including imports that might print a warning.
     private_stdout = os.dup(1)
@@ -92,7 +100,9 @@ def _handle(request: dict) -> dict:
     original = frame.copy(deep=True)
 
     fn, logs = _load(source)
-    out, more_logs = _call(fn, frame)
+    # The host allows this plus container startup; firing here first means
+    # a timeout is reported as one rather than inferred from an exit code.
+    out, more_logs = _call(fn, frame, _timeout_s())
     logs = _clip(logs + more_logs)
 
     try:
@@ -137,11 +147,50 @@ def _load(source: str):
     return fn, buffer.getvalue()
 
 
-def _call(fn, frame):
+@contextlib.contextmanager
+def _deadline(seconds: int):
+    """Stop the transform from inside, a little before the host gives up.
+
+    Without this the only limit is the host's `subprocess` timeout, which has
+    to allow for container startup on top of the budget - so an 8-second
+    timeout took 30 seconds to report. Worse, the host's path has to kill the
+    container and then work out from `OOMKilled` what happened; stopping here
+    means the answer is simply known.
+
+    `SIGALRM` is POSIX-only. The sandbox is Linux, but the runner is also
+    driven directly in tests on Windows, where the host timeout remains the
+    only backstop.
+    """
+    import signal
+
+    if seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def fire(signum, frame):
+        raise TimeoutError(f"exceeded {seconds} seconds")
+
+    previous = signal.signal(signal.SIGALRM, fire)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _call(fn, frame, timeout_s: int = 0):
     buffer = io.StringIO()
     try:
-        with contextlib.redirect_stdout(buffer):
+        with contextlib.redirect_stdout(buffer), _deadline(timeout_s):
             out = fn(frame)
+    except TimeoutError as e:
+        raise _Refusal("timeout",
+                       f"The transform did not finish in time ({e}) and was "
+                       "stopped. A loop over rows is the usual cause; a "
+                       "vectorised operation is usually thousands of times "
+                       "faster.",
+                       logs=buffer.getvalue())
     except MemoryError:
         # Usually the container kills the process before this is reachable;
         # when it is reachable the message beats a bare traceback.

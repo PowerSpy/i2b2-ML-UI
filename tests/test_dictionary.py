@@ -209,3 +209,62 @@ def test_last_value_cte_orders_newest_first():
     assert "DISTINCT ON (patient_num, concept_cd)" in sql
     assert "start_date DESC" in sql
     assert "WHERE concept_cd = 'x'" in sql
+
+
+# --------------------------------------------------------------------------
+# what the build actually reads
+#
+# These exist because the live warehouse found what the fabricated rows above
+# could not: i2b2 writes tval_char='E' - the operator flag for "equals" - on
+# every *numeric* fact. Reading tval_char first collapsed every integer-coded
+# concept to a single level called 'E' (cp has four and reported one), and
+# counting it as text marked all 35 columns in the warehouse as mixed-type.
+
+
+def test_the_value_expression_prefers_the_numeric_column():
+    """The ordering is the bug. `coalesce(tval_char, nval_num)` picks the
+    operator flag over the value on every numeric row."""
+    from app.core import dictionary
+
+    assert dictionary.VALUE.index("nval_num") < dictionary.VALUE.index("tval_char")
+    assert "valtype_cd = 'N'" in dictionary.IS_NUMERIC
+
+
+def test_text_excludes_rows_that_are_really_numeric():
+    """Otherwise 'E' counts as a text value and every numeric column in the
+    warehouse is reported as carrying mixed types."""
+    from app.core import dictionary
+
+    assert dictionary.IS_TEXT.startswith(f"NOT ({dictionary.IS_NUMERIC})")
+
+
+def test_the_operator_flag_does_not_make_a_column_mixed():
+    c = build(col(n_numeric=1197, n_text=0, n_distinct=4))
+    assert c["mixed_valtype"] is False
+
+
+def test_a_fact_with_no_value_at_all_is_a_flag_not_a_numeric():
+    """dm_positive marks cohort membership and carries neither value column.
+    Calling it numeric reports every percentile as null, which the UI renders
+    identically to "not loaded yet"."""
+    c = build(col(patients_with_value=150, n_numeric=0, n_text=0, n_distinct=0))
+
+    assert c["kind"] == "flag"
+    assert c["empty_in_build"] is True
+    assert "numeric value column" in c["build_note"]
+
+
+def test_a_column_the_build_cannot_read_says_so():
+    """The pivot is `values='value'` where value is nval_num renamed
+    (apply_build_model_ml.py:155-164) - tval_char is never read. A text
+    category is an all-NaN feature however full it looks in the warehouse."""
+    c = build(col(patients_with_value=200, n_numeric=0, n_text=200, n_distinct=3),
+              [{"value": "yes", "count": 120, "numeric": False},
+               {"value": "no", "count": 80, "numeric": False}])
+
+    assert c["empty_in_build"] is True
+
+
+def test_a_numeric_column_is_not_flagged_as_empty_in_build():
+    assert build(col())["empty_in_build"] is False
+    assert build(col())["build_note"] is None

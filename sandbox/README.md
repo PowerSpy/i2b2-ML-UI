@@ -137,25 +137,45 @@ hook in `apply_build_model_ml.py`, with the host polling a spool directory —
 the ETL container gains no docker access and no new network route. Until it
 exists, nothing in this directory has ever seen a patient row.
 
-## Unverified
+## Verified against real containers
 
-The Docker daemon was unreachable while this was written, so:
+`tests/test_live_sandbox.py` runs each escape attempt and requires the *right*
+refusal, not just any failure:
 
-- the image has never been built
-- `build.sh probe` has never run against a live ETL container, and the pinned
-  versions are therefore placeholders
-- no container has ever been launched with the flags in `app/core/sandbox.py`
-- the escape attempts that would prove the isolation — a socket to `i2b2-pg`,
-  `open("/etc/passwd")`, `[0]*10**9` asserting *memory* rather than *timeout*,
-  `while True: pass` asserting *timeout* rather than *memory* — have not been
-  run
+| Attempt | Result |
+|---|---|
+| `pd.read_csv('http://i2b2-pg:5432/')` — the path the guard never sees | name resolution fails |
+| the same by raw address, so it is not only DNS | fails |
+| `pd.read_csv('/usr/src/app/requirements.txt')` | no such file — no host mounts |
+| `df.to_csv('/leak.csv')` | read-only filesystem |
+| `[0] * 10**9` | reported **memory**, not timeout |
+| `while True: pass` | reported **timeout**, not memory |
+| two runs, one killed | no container left behind |
 
-What *has* been verified is everything inside the container: `runner/` is
-driven as a real subprocess by `tests/test_sandbox_runner.py`, which covers the
+The first is the one that matters: `pandas` opens the socket, so the import
+allowlist never sees it. If that test ever passes, the sandbox is not a
+sandbox.
+
+`tests/test_sandbox_runner.py` drives `runner/` as a real subprocess — the
 guard, the generator, the transform call, the validator and the fd-1
-redirection. `tests/test_sandbox_args.py` asserts the flags are passed and that
-an exit code becomes the right sentence — it does not assert that the flags
-work.
+redirection. `tests/test_sandbox_args.py` asserts the flags are *passed*;
+`test_live_sandbox.py` asserts they *work*.
+
+## Still unverified
+
+**The version pin is a claim, not an observation.** The ETL container declares
+`pandas==2.3.0`, `numpy==1.26.4`, `scikit-learn==1.3.2`, `scipy==1.14.1` in
+`/usr/src/app/requirements.txt` and **has none of them installed** — it cannot
+currently run a model build at all. `build.sh` falls back to the declared pins,
+records `declared` in `.pin-source`, and `verify` refuses to claim a match it
+has not seen. Re-probe once the container's dependencies are installed.
+
+**Nothing here has run against real data**, because the real path does not
+exist yet. See *Status*.
+
+**A dry run costs 7–15 seconds**, nearly all of it container start and the
+pandas import. Tolerable for an edit-run loop, but it is the first thing to
+improve if the loop gets used seriously.
 
 ## Residual risk this does not close
 

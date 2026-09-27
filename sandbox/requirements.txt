@@ -1,21 +1,20 @@
-# Pinned to whatever `i2b2-etl` runs. Nothing else is acceptable.
+# Pinned to the versions 'i2b2-etl' DECLARES in its requirements.txt.
 #
-# The dev loop's entire promise is "if it runs here it runs there", and a
-# pandas minor bump is enough to break it: `groupby` observed-default, silent
-# downcasting, and copy-on-write all changed behaviour between 1.x and 2.x
-# without changing an API. A transform validated against the wrong version
-# reports success and then fails on a job row.
+# It does not have them installed, so it cannot currently run a
+# model build and these pins have not been observed running
+# anything. Re-probe once the container's dependencies are
+# installed - until then the dev loop's promise that behaviour
+# here predicts behaviour there is unverified.
+# Written by sandbox/build.sh probe on 2026-09-27T17:59:03Z.
 #
-# UNPROBED is not a version. `build.sh` refuses to build while it is here.
-# Fill this file by running:
-#
+# Do not hand-edit. Re-probe after any change to the ETL image:
 #     ./sandbox/build.sh probe
 #
-# which reads the versions out of the running ETL container and rewrites this
-# file. Do not hand-edit the pins to make a build go through - the point of the
-# refusal is that a guess is worse than a stop.
+# A mismatch between these and the container is not a warning. The
+# whole point of the dev loop is that behaviour here predicts
+# behaviour there, and a version skew silently ends that.
 
-pandas==UNPROBED
-numpy==UNPROBED
-scikit-learn==UNPROBED
-scipy==UNPROBED
+pandas==2.3.0
+numpy==1.26.4
+scikit-learn==1.3.2
+scipy==1.14.1

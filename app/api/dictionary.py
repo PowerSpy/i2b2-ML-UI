@@ -23,6 +23,11 @@ class Column(BaseModel):
     # ones. The build never mentions it, so the dictionary does.
     mixed_valtype: bool = False
 
+    # The build's pivot reads only the numeric value column, so a concept with
+    # no numeric values is an all-NaN feature however full it looks here.
+    empty_in_build: bool = False
+    build_note: str | None = None
+
     patients_with_value: int | None = None
     fill_rate: float | None = None
     missing_rate: float | None = None

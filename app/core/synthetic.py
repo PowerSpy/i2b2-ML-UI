@@ -176,6 +176,25 @@ def _spec(col: dict, *, hostile: bool) -> tuple[dict, list[str]]:
         warnings.append(f"{code}: withheld by suppression, all-NaN in this frame")
         return spec, warnings
 
+    if col.get("empty_in_build"):
+        # The build's pivot reads only `nval_num`, so this column is all-NaN
+        # in the real frame whatever the warehouse holds. Materialising its
+        # real levels would be the worst kind of divergence: the researcher
+        # writes `pd.get_dummies(df['x'])` against values that work here and
+        # meets an empty column on the job row.
+        spec["kind"] = "empty"
+        spec["fill_rate"] = 0.0
+        spec["notes"].append(
+            col.get("build_note")
+            or "the build reads only the numeric value column; this one is "
+               "all-NaN in the real frame too"
+        )
+        warnings.append(
+            f"{code}: empty in the real frame - the build's pivot reads only "
+            "the numeric value column, and this concept has no numeric values"
+        )
+        return spec, warnings
+
     if hostile:
         spec["fill_rate"] = round(spec["fill_rate"] / 2, 4)
 

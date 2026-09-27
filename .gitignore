@@ -15,3 +15,7 @@ dist/
 config.yaml
 .gstack/
 var/
+
+# Written by sandbox/build.sh probe from the live ETL container.
+sandbox/.python-version
+sandbox/.pin-source

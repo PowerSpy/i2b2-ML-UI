@@ -247,15 +247,30 @@ def _concept_names(codes: list[str]) -> dict[str, str]:
     }
 
 
+# Which of the two value columns a row actually carries.
+#
+# `valtype_cd` is the authority and `tval_char` on its own is not: i2b2 writes
+# **'E'** into `tval_char` on every *numeric* fact, as the operator flag for
+# "equals". Reading tval_char first therefore collapses every integer-coded
+# concept to a single level called 'E' - cp has four real levels and reported
+# one - and counting it as text marks every numeric column in the warehouse as
+# carrying mixed types.
+IS_NUMERIC = "valtype_cd = 'N' AND nval_num IS NOT NULL"
+IS_TEXT = f"NOT ({IS_NUMERIC}) AND tval_char IS NOT NULL AND tval_char <> ''"
+
+# The value a row contributes, or NULL if it carries none.
+VALUE = (f"CASE WHEN {IS_NUMERIC} THEN nval_num::float8::text "
+         f"     WHEN {IS_TEXT} THEN tval_char END")
+
+
 def _numeric_stats(where: str) -> dict[str, dict]:
     rows = query(
         f"WITH lv AS ({quality.last_value_cte(where)}) "
         "SELECT concept_cd AS code, "
         "       count(*) AS patients_with_value, "
-        "       count(*) FILTER (WHERE nval_num IS NOT NULL) AS n_numeric, "
-        "       count(*) FILTER (WHERE tval_char IS NOT NULL AND tval_char <> '')"
-        "           AS n_text, "
-        "       count(DISTINCT coalesce(nval_num::text, tval_char)) AS n_distinct, "
+        f"       count(*) FILTER (WHERE {IS_NUMERIC}) AS n_numeric, "
+        f"       count(*) FILTER (WHERE {IS_TEXT}) AS n_text, "
+        f"       count(DISTINCT {VALUE}) AS n_distinct, "
         "       count(*) FILTER (WHERE nval_num = 0) AS n_zero, "
         "       count(*) FILTER (WHERE nval_num < 0) AS n_negative, "
         "       coalesce(bool_and(nval_num = trunc(nval_num)), false) AS integer_like, "
@@ -292,15 +307,13 @@ def _levels(where: str, codes: list[str]) -> dict[str, list[dict]]:
     # Only the categorical columns. A continuous column would return one row
     # per distinct value, which is both useless here and the bulk of the work.
     joined = ", ".join(f"'{check_code(c)}'" for c in codes)
-    val = "coalesce(tval_char, nval_num::float8::text)"
     rows = query(
         f"WITH lv AS ({quality.last_value_cte(where)}) "
-        f"SELECT concept_cd AS code, {val} AS value, "
+        f"SELECT concept_cd AS code, {VALUE} AS value, "
         "       count(*) AS n, "
-        "       count(*) FILTER (WHERE tval_char IS NULL) AS n_numeric "
-        f"FROM lv WHERE concept_cd IN ({joined}) "
-        f"  AND {val} IS NOT NULL AND {val} <> '' "
-        f"GROUP BY concept_cd, {val} "
+        f"       count(*) FILTER (WHERE {IS_NUMERIC}) AS n_numeric "
+        f"FROM lv WHERE concept_cd IN ({joined}) AND {VALUE} IS NOT NULL "
+        f"GROUP BY concept_cd, {VALUE} "
         "ORDER BY concept_cd, count(*) DESC;"
     )
     out: dict[str, list[dict]] = {}
@@ -325,6 +338,14 @@ def _kind(s) -> str:
     n_numeric = _int(s.get("n_numeric"))
     n_text = _int(s.get("n_text"))
     n_distinct = _int(s.get("n_distinct"))
+
+    # Rows exist but neither value column holds anything: a membership flag
+    # such as dm_positive, which marks a patient as belonging to a set. Naming
+    # it beats calling it numeric and then reporting every percentile as null,
+    # which the UI would render identically to "not loaded yet".
+    if _int(s.get("patients_with_value")) > 0 and n_numeric == 0 and n_text == 0:
+        return "flag"
+
     return "categorical" if (
         n_text > n_numeric or (0 < n_distinct <= CATEGORICAL_MAX_DISTINCT and n_numeric > 0)
     ) else "numeric"
@@ -341,11 +362,28 @@ def _column(code, name, s, levels, patients_in_scope, min_cell) -> dict:
     mixed = n_numeric > 0 and n_text > 0
     kind = _kind(s)
 
+    # The build's pivot is `values='value'`, and `value` is `nval_num`
+    # renamed (apply_build_model_ml.py:155-164). **`tval_char` is never read.**
+    # So a concept with no numeric values is an all-NaN column in the frame
+    # however interesting it looks here - a text-valued category, or a
+    # membership flag like dm_positive that carries no value at all.
+    #
+    # Saying so is the difference between a researcher writing
+    # `pd.get_dummies(df['x'])` against levels that exist in the warehouse and
+    # finding out on a job row that the column was empty the whole time.
+    empty_in_build = with_value > 0 and n_numeric == 0
+
     col = {
         "code": code,
         "name": name or None,
         "kind": kind,
         "mixed_valtype": mixed,
+        "empty_in_build": empty_in_build,
+        "build_note": (
+            "The build reads only the numeric value column, so this one "
+            "arrives as an all-NaN feature no matter what it holds here."
+            if empty_in_build else None
+        ),
         "patients_with_value": _suppress(with_value, min_cell),
         "fill_rate": (round(with_value / patients_in_scope, 4)
                       if patients_in_scope and with_value >= min_cell else None),
