@@ -24,6 +24,33 @@ docker-changes/
 [i2b2-ETL-ML-Models](https://github.com/PowerSpy/i2b2-ETL-ML-Models). The
 patched `apply_build_model_ml.py` is not — see below.
 
+## The interpreter is the venv, not `python3`
+
+The container starts with:
+
+```
+bash -c "source /usr/src/app/.venv/bin/activate && sleep 60 && ...          python -m i2b2_cdi.job.jobWatcher ... && python -m i2b2_cdi.loader.i2b2_cdi_app"
+```
+
+So **everything that matters runs under `/usr/src/app/.venv/bin/python`.** The
+system `python3` has no pandas, no sklearn and no psycopg2, and never did.
+`apply.sh` already uses `.venv/bin/python`; anything new must too.
+
+This is worth stating because getting it wrong is quiet rather than loud.
+Probing `python3` reports every ML package missing, which reads as "the
+container is broken" when the venv is sitting there fully populated.
+
+**`/usr/src/app/requirements.txt` is not what is installed.** It has drifted
+from the venv, so it cannot be used as a substitute for asking:
+
+| package | declared | venv runs |
+|---|---|---|
+| pandas | 2.3.0 | 2.3.3 |
+| imbalanced-learn | 0.13.0 | 0.14.2 |
+| xgboost | 3.0.2 | 3.3.0 |
+
+`sandbox/build.sh probe` reads the venv and prints which interpreter it used.
+
 ## Reinstalling
 
 ```bash
