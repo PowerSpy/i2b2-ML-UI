@@ -130,12 +130,21 @@ column is always populated.
 
 ## Status
 
-Implemented: the dry-run path, end to end, against fabricated data.
+Both paths are implemented.
 
-Not implemented: the real-data path. That runs inside the ETL container via a
-hook in `apply_build_model_ml.py`, with the host polling a spool directory —
-the ETL container gains no docker access and no new network route. Until it
-exists, nothing in this directory has ever seen a patient row.
+**Dry run** — `POST /api/ml-concepts/{code}/transform/dry-run`, against rows
+generated from the published dictionary. Returns frame contents, because that
+data is fabricated.
+
+**Real run** — the build calls `transform_hook.py` inside the ETL container,
+which spools the frame to `app/core/spooler.py` on the host, which runs it
+here in `run` mode. Returns the transformed frame to that container and
+**counts to everyone else**: no `preview`, no `input_preview`, asserted by
+`tests/test_live_spooler.py`. The two modes must not look alike, and that is
+the line between a debugging aid and an export.
+
+The handover is parquet, so dtypes survive. A column that leaves as `float64`
+and arrives as `object` would change what the scaler does, silently.
 
 ## Verified against real containers
 

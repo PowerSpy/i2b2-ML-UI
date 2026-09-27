@@ -24,7 +24,10 @@ ETL="${ETL_CONTAINER:-i2b2-etl}"
 REQ="$HERE/requirements.txt"
 PINFILE="$HERE/.python-version"
 
-PACKAGES=(pandas numpy scikit-learn scipy)
+# pyarrow is not optional: the real-data path hands the frame over as
+# parquet so dtypes survive, and a dtype that differs between here and
+# the ETL is precisely what this pinning exists to prevent.
+PACKAGES=(pandas numpy scikit-learn scipy pyarrow)
 
 die() { echo "build.sh: $*" >&2; exit 1; }
 
@@ -73,7 +76,7 @@ probe_versions() {
   docker exec "$ETL" sh -c "'$py' -c '
 import importlib.metadata as m, sys
 print(\"python=%d.%d\" % sys.version_info[:2])
-for p in (\"pandas\", \"numpy\", \"scikit-learn\", \"scipy\"):
+for p in (\"pandas\", \"numpy\", \"scikit-learn\", \"scipy\", \"pyarrow\"):
     try:
         print(\"%s=%s\" % (p, m.version(p)))
     except Exception:

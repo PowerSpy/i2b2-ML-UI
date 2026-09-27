@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import current_principal
-from app.core import audit, authz, cohorts, db, etl_api, ml_blob
+from app.core import audit, authz, cohorts, db, etl_api, ml_blob, spooler
 from app.core.auth import Principal
 from app.core.config import settings
 
@@ -114,6 +114,23 @@ def _assert_may_touch(principal: Principal, path: str) -> None:
     )
 
 
+def _assert_transform_can_run(path: str) -> None:
+    """Refuse at the door when a transform build cannot possibly work.
+
+    Following the doctrine already set a few lines above: name the fix rather
+    than queue something that dies in a worker. A model with a transform built
+    against a container without the hook does not error - it trains on the raw
+    columns and reports success, which is the outcome worth the most trouble to
+    prevent.
+    """
+    code = ml_blob.code_at_path(path)
+    if not code:
+        return
+    ok, why = spooler.readiness(code)
+    if not ok:
+        raise HTTPException(409, why)
+
+
 @router.post("/jobs/build", response_model=Job_Out)
 def build(body: Build_In,
           principal: Principal = Depends(current_principal)) -> Job_Out:
@@ -128,6 +145,8 @@ def build(body: Build_In,
             f"no model config at {body.path} — define the model in step 3 first. "
             "(Folders in the concept tree are not models.)",
         )
+
+    _assert_transform_can_run(body.path)
 
     before = _max_job_id()
     res = etl_api.post("/etl/job", json={
@@ -150,6 +169,12 @@ def apply(body: Apply_In,
 
     if not ml_blob.is_built_at_path(body.path):
         raise HTTPException(409, f"no trained model at {body.path} — build it first")
+
+    # Apply runs the transform too, so the same prerequisites hold. The
+    # container additionally refuses if the stored transform is not the one the
+    # model was trained with; this only catches the case where it could not run
+    # at all.
+    _assert_transform_can_run(body.path)
 
     known = {c["name"] for c in cohorts.list_cohorts()}
     unknown = sorted(set(body.target_patient_set) - known)

@@ -1,5 +1,6 @@
 import sys
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.deps import current_principal
 from app.api.router import api_router, public_router
-from app.core import audit, store
+from app.core import audit, spooler, store
 from app.core.config import API_PREFIX, APP_NAME, settings
 from app.core.etl_api import Etl_API_Error
 
@@ -107,8 +108,26 @@ def _warn_if_exposed() -> None:
                 port=settings.port, problem_count=len(problems))
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run the transform spooler for as long as the app is up.
+
+    Feature transforms execute on this side of the docker socket, not inside
+    the ETL container. A build of a model that has one writes a request into a
+    spool directory and blocks until this answers, so the watcher has to be
+    alive for that build to finish - `jobs.build` refuses at queue time when it
+    is not, rather than letting a job hang.
+    """
+    if settings.transform_spooler:
+        spooler.start()
+    try:
+        yield
+    finally:
+        spooler.stop()
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title=APP_NAME)
+    app = FastAPI(title=APP_NAME, lifespan=lifespan)
 
     # Before anything can serve a request, so a failure here is a loud startup
     # failure rather than a silently absent audit trail.
@@ -138,6 +157,7 @@ def create_app() -> FastAPI:
     # app/api/router.py, which is a visible edit in an obvious place.
     app.include_router(api_router, prefix=API_PREFIX,
                        dependencies=[Depends(current_principal)])
+
     return app
 
 

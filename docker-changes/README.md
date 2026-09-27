@@ -190,3 +190,80 @@ Then set `etl_user: 'Demo\demo'` and `etl_password: '<that id>'`.
 **jobWatcher starts itself.** It is in the container's own start command, about
 75 seconds after boot. Starting it by hand adds a second daemon racing the
 first for queued jobs.
+
+## The feature transform hook
+
+`transform_hook.py` runs a model's researcher-written feature transform. **The
+researcher's code does not execute in this container** — it holds the warehouse
+credentials, and running arbitrary Python beside them would make every other
+control decorative.
+
+Instead the hook writes the frame into `/tmp/i2b2ml-spool` and blocks. The i2b2
+ML UI backend, on the host, notices the request over `docker exec`, pulls it
+with `docker cp`, runs it in a container with `--network none` and no
+credentials, and writes the answer back. **This container gains no docker
+access, no new network route and no recreate.**
+
+That is the same idiom the whole application already uses — the host drives
+containers over exec and cp — so it adds no trust relationship that did not
+already exist. Every alternative does: mounting the docker socket in here is
+host root, and in-process `unshare` needs `CAP_SYS_ADMIN` and leaves the code
+one file permission away from the database password.
+
+### Three insertions into apply_build_model_ml.py
+
+**1. The call**, placed after `label` and `subject_id` are dropped and *before*
+`fillna(0)`, so the transform sees missingness — which is most of what a
+feature transform is for. It sits above the build/apply branch deliberately, so
+**both** paths run it.
+
+**2. A one-class guard.** A transform that filters rows can leave a single
+outcome class behind, and the failure that follows is `The target y needs to
+have more than 1 class` from inside imblearn — naming neither the transform nor
+the rows it dropped.
+
+**3. `metrics.update(transform_report)`** before `save_model_in_concept_blob`.
+`metrics`, not `blob`: anything written to the local `blob` in that function is
+discarded when it returns. This is what stamps `transform_sha256` onto the
+trained model.
+
+### The apply branch refuses a mismatch
+
+Stock behaviour for a feature the model was trained on but which is not present
+at apply time:
+
+```python
+for c in selected_features:
+    if c not in X.columns:
+        X[c] = 0
+```
+
+So a model built with a transform that engineers `bmi`, applied without that
+transform, scores **every patient off a zero column and returns success**. The
+patched branch compares `transform_sha256` and raises instead. This is the most
+dangerous silent failure in the feature, which is why it refuses rather than
+warns.
+
+### Row alignment
+
+`load_pred_facts` pairs predictions to patients *positionally*, so if a
+transform drops rows, `y` and `pt_num_list` must lose exactly those rows in
+exactly that order. The hook does this by index, and the index it hands the
+transform is **opaque ids above 1,000,000, never a RangeIndex and never patient
+numbers**.
+
+That detail is load-bearing. Against a `0..n-1` index,
+`reset_index(drop=True)` after a filter produces `0..k-1` — a perfectly valid
+subset. The check would pass, every row would be renumbered, and every
+prediction would be written against the wrong patient. Ids above a floor make
+that renumbering impossible to mistake for a filter.
+
+### What it costs
+
+A build of a model with a transform now needs the backend running. That is a
+new way for a build to fail that has nothing to do with the model. It fails
+loudly and by name, and `jobs.build` refuses at queue time rather than letting
+a job hang — but it is a real new coupling.
+
+Observed latency for one transform, on Windows: roughly 10–15 seconds warm,
+most of it `docker exec` round trips and sandbox container start.

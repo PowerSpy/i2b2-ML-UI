@@ -198,8 +198,41 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
     y = y.astype(int)
     logger.info(pd.Series(y).value_counts())
     X=data.drop(columns=['label'])
+
+    # The model's feature transform, if it has one.
+    #
+    # Placed here for three reasons. It is after `label` and `subject_id` are
+    # removed, so researcher code never sees the answer or a patient number.
+    # It is before `fillna(0)`, so the transform can see missingness - which is
+    # most of what a feature transform is for, and the dev frame reproduces the
+    # fill rates precisely so this works. And it is above the build/apply
+    # branch, so **both** paths run it: a model built with an engineered column
+    # and applied without one would find that column absent, fill it with zeros
+    # a few lines below, and score every patient off it while returning success.
+    #
+    # The code does not run in this container. It is spooled to the host, run
+    # with no network and no credentials, and the frame comes back. Failure
+    # raises - there is no fallback to the untransformed frame, because that
+    # would train a different model from the one that was asked for and report
+    # success.
+    from i2b2_cdi.ML.transform_hook import run_transform
+    X, y, pt_num_list, transform_report = run_transform(
+        X, y, pt_num_list, blob,
+        ml_code=ml_code, job_id=job_id, task=params['task'])
+    if transform_report.get('transform_applied'):
+        print('transform applied:', transform_report)
+        # A transform that filters rows can leave one class behind, and the
+        # failure that follows is "The target y needs to have more than 1
+        # class" from inside imblearn - which names neither the transform nor
+        # the rows it dropped.
+        if params['task'] == 'build' and y.nunique() < 2:
+            raise RuntimeError(
+                'TRANSFORM FAILED: after the transform only one outcome class '
+                'is left (%d rows). It filtered out every patient of the other '
+                'class, so there is nothing to train against.' % len(y))
+
     X= X.fillna(0)#.sample(frac=0.1, random_state=42).reset_index(drop=True)
-  
+
     # Classifier selectable via blob["model_type"]; defaults to logistic
     # regression. See model_registry.py to add new models - no changes
     # needed here when adding a model, just register it there.
@@ -317,6 +350,15 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
             logger.warning("Diagnostic plot generation failed: {}", _plot_exc)
         # --- end diagnostic plots --------------------------------------------
 
+        # Recorded on the model, not on the local `blob`: only `metrics` is
+        # passed to save_model_in_concept_blob, and anything written to `blob`
+        # here is discarded when this function returns.
+        #
+        # transform_sha256 is what ties a trained model to the exact code that
+        # produced its features. The apply path below refuses to score with a
+        # different one, and without this stamp it could not tell.
+        metrics.update(transform_report)
+
         save_model_in_concept_blob(ml_code,params,metrics,selected_features,prediction_pipeline)
         return 'saved model'
     else:
@@ -326,7 +368,34 @@ def apply_build_model(conceptPath,ml_code,crc_ds,job_id,blob=None, concept_blob=
         model_str=concept_blob['serialized_model']
         loaded_model = load_model_from_base64(model_str)
         selected_features=concept_blob['feature_column_codes']
+
+        # The model was trained on features produced by a particular transform.
+        # Scoring with a different one - or none - is not a degraded result, it
+        # is a wrong one, and the loop below would hide it completely: any
+        # engineered column the transform is no longer producing is simply
+        # filled with zeros and the run returns success.
+        #
+        # This is the single most dangerous silent failure in the feature, so
+        # it refuses rather than warns.
+        trained_sha = concept_blob.get('transform_sha256')
+        applied_sha = transform_report.get('transform_sha256')
+        if trained_sha != applied_sha:
+            raise RuntimeError(
+                'TRANSFORM FAILED: this model was trained with feature '
+                'transform %s but is being applied with %s. The engineered '
+                'columns would be filled with zeros and every prediction would '
+                'be made from them. Rebuild the model, or restore the '
+                'transform it was trained with.'
+                % (str(trained_sha)[:12] or 'none', str(applied_sha)[:12] or 'none'))
+
         print(X.columns.to_list())
+        missing = [c for c in selected_features if c not in X.columns]
+        if missing:
+            # Reached only when the transform matches, so this is a data
+            # problem rather than a code one - but it is still every patient
+            # scored off a zero column, and it was silent before.
+            print('WARNING: %d trained features are absent and will be zero: %s'
+                  % (len(missing), ', '.join(map(str, missing[:10]))))
         for c in selected_features:
             if c not in X.columns:
                 X[c]=0

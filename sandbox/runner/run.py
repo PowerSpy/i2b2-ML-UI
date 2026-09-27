@@ -74,12 +74,11 @@ class _Refusal(Exception):
 
 def _handle(request: dict) -> dict:
     mode = request.get("mode")
+    if mode == "run":
+        return _handle_real(request)
     if mode != "dry-run":
-        # The real-data path runs inside the ETL container via the hook, not
-        # here. Refusing by name beats accepting a mode this runner cannot
-        # honour and returning something that looks like a result.
         raise _Refusal("protocol",
-                       f"unsupported mode {mode!r}; this runner only does dry-run")
+                       f"unsupported mode {mode!r}; expected dry-run or run")
 
     source = request.get("source") or ""
     plan = request.get("plan") or {}
@@ -118,6 +117,74 @@ def _handle(request: dict) -> dict:
         # counts and nothing else - see `app/core/sandbox.py`.
         "input_preview": validate.preview(original),
         "preview": validate.preview(out),
+        "logs": logs,
+    }
+
+
+def _handle_real(request: dict) -> dict:
+    """The real frame: parquet in, parquet out, and **no frame content in the
+    report**.
+
+    This is the path that sees patient data. The dry run returns rows because
+    its rows are fabricated; this one returns counts, and the two must never
+    look alike. The transformed frame goes back to the ETL container that sent
+    it and nowhere else - no API surfaces it.
+
+    Parquet rather than CSV or JSON because dtypes have to survive. A column
+    that leaves here as float64 and arrives as object would change what the
+    scaler does, silently.
+    """
+    import base64
+    import io
+
+    from . import guard, validate
+
+    source = request.get("source") or ""
+    packed = request.get("frame_parquet_b64")
+    if not packed:
+        raise _Refusal("protocol", "no frame was sent with a run request")
+
+    try:
+        guard.check(source)
+    except guard.GuardError as e:
+        raise _Refusal("rejected", str(e))
+
+    import pandas as pd
+
+    try:
+        frame = pd.read_parquet(io.BytesIO(base64.b64decode(packed)))
+    except Exception as e:
+        raise _Refusal("protocol", f"the frame could not be read: {e}")
+
+    original = frame.copy(deep=True)
+
+    fn, logs = _load(source)
+    out, more_logs = _call(fn, frame, _timeout_s())
+    logs = _clip(logs + more_logs)
+
+    try:
+        report = validate.check(out, original)
+    except validate.ValidationError as e:
+        raise _Refusal("invalid_output", str(e), logs=logs)
+
+    buffer = io.BytesIO()
+    try:
+        out.to_parquet(buffer, index=True)
+    except Exception as e:
+        raise _Refusal("invalid_output",
+                       f"the returned frame could not be serialised: {e}. "
+                       "Every column has to hold a plain numeric type.",
+                       logs=logs)
+
+    return {
+        "ok": True,
+        "error": None,
+        "report": report,
+        "frame_parquet_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        # Deliberately absent, and asserted absent by a test: the real run
+        # publishes counts, never a row.
+        "preview": None,
+        "input_preview": None,
         "logs": logs,
     }
 

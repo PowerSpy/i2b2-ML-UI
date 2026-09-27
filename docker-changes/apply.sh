@@ -26,8 +26,15 @@ docker exec "$CONTAINER" bash -lc \
 docker exec "$CONTAINER" bash -lc \
   "cd $FACT_DIR && [ -f fact_validation_helper.py.orig ] || cp fact_validation_helper.py fact_validation_helper.py.orig"
 
+# The validator is *copied* from the sandbox rather than kept as a second
+# copy here. The container and the sandbox have to agree about what a valid
+# transform output is; two hand-maintained files would drift, and the way they
+# would drift is one side accepting a frame the other rejects.
+echo "==> staging the shared transform validator"
+cp "$HERE/../sandbox/runner/validate.py" "$HERE/i2b2_cdi/ML/transform_validate.py"
+
 echo "==> copying files in"
-for f in apply_build_model_ml.py model_registry.py model_plots.py; do
+for f in apply_build_model_ml.py model_registry.py model_plots.py transform_hook.py transform_validate.py; do
     docker cp "$HERE/i2b2_cdi/ML/$f" "$CONTAINER:$ML_DIR/$f"
     echo "    ML/$f"
 done
@@ -46,6 +53,13 @@ for _ in $(seq 1 60); do
     if docker exec "$CONTAINER" bash -lc "test -d /usr/src/app" >/dev/null 2>&1; then break; fi
     sleep 1
 done
+
+echo "==> verifying the transform hook imports"
+docker exec "$CONTAINER" bash -lc "cd /usr/src/app && .venv/bin/python -c '
+from i2b2_cdi.ML.transform_hook import run_transform, read_source
+from i2b2_cdi.ML import transform_validate
+print(\"transform hook: ok\")
+'"
 
 echo "==> verifying the registry imports"
 docker exec "$CONTAINER" bash -lc "cd /usr/src/app && .venv/bin/python -c '
@@ -75,7 +89,13 @@ Done. Two things this script deliberately does not do:
      roughly 75s after the container comes up (there is a `sleep 60` first).
      Do not start it by hand; a second one races the first for queued jobs.
 
-  2. The API is not reachable from the host on its own - this container
+  2. Models with a feature transform need the i2b2 ML UI backend running.
+     Their code is executed on the host, in a sandbox container with no
+     network - this container only writes a request and waits. A build
+     submitted while the backend is down is refused at queue time rather
+     than hanging.
+
+  3. The API is not reachable from the host on its own - this container
      publishes no ports. Start the proxy once:
 
        docker run -d --name i2b2-etl-proxy --network i2b2-net \

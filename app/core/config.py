@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # makes the image trustworthy, and it re-runs on every build.
     sandbox_image: str = "i2b2-ml-sandbox:local"
 
+    # Whether to watch the ETL container's spool directory for transform
+    # requests. Off means models with a feature transform cannot be built -
+    # the queue-time guard says so rather than letting the build hang.
+    transform_spooler: bool = True
+
     app_db: Path = CONFIG_FILE.parent / "var" / "app.db"
     audit_dir: Path = CONFIG_FILE.parent / "var" / "audit"
     audit_enabled: bool = True

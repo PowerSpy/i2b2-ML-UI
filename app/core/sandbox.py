@@ -129,7 +129,46 @@ def run_transform(source: str, plan: dict, *,
     if not ok:
         raise SandboxUnavailable(why)
 
-    request = json.dumps({"mode": "dry-run", "source": source, "plan": plan})
+    result = _invoke({"mode": "dry-run", "source": source, "plan": plan},
+                     timeout_s=timeout_s)
+    audit.event(
+        "sandbox_dry_run",
+        subject="dry-run",
+        status="ok" if result.get("ok") else "error",
+        duration_ms=result.get("duration_ms"),
+        source_chars=len(source),
+        n_rows=plan.get("n_rows"),
+        n_columns=len(plan.get("columns") or []),
+        outcome=(result.get("error") or {}).get("kind", "ok"),
+    )
+    return result
+
+
+def run_frame(source: str, frame_parquet_b64: str, *,
+              timeout_s: int = DEFAULT_TIMEOUT_S) -> dict:
+    """Run `source` against a **real** frame, handed over as base64 parquet.
+
+    Called only by the spooler, on behalf of the ETL container. The response
+    carries the transformed frame back to that container and carries **no
+    preview** - the dry run shows rows because its rows are fabricated, and
+    these are not. Nothing in this module returns real frame content to an API.
+    """
+    ok, why = available()
+    if not ok:
+        raise SandboxUnavailable(why)
+
+    return _invoke({"mode": "run", "source": source,
+                    "frame_parquet_b64": frame_parquet_b64},
+                   timeout_s=timeout_s)
+
+
+def _invoke(request: dict, *, timeout_s: int) -> dict:
+    """Start the container, feed it the request, interpret how it ended."""
+    ok, why = available()
+    if not ok:
+        raise SandboxUnavailable(why)
+
+    payload = json.dumps(request)
     name = f"i2b2ml-sandbox-{uuid.uuid4().hex[:12]}"
     started = time.perf_counter()
     timed_out = False
@@ -138,7 +177,7 @@ def run_transform(source: str, plan: dict, *,
         try:
             p = subprocess.run(
                 docker_args(name, timeout_s),
-                input=request, capture_output=True, text=True,
+                input=payload, capture_output=True, text=True,
                 timeout=timeout_s + OVERHEAD_S,
             )
             code, stdout, stderr = p.returncode, p.stdout, p.stderr
@@ -153,18 +192,7 @@ def run_transform(source: str, plan: dict, *,
     finally:
         _remove(name)
 
-    duration_ms = round((time.perf_counter() - started) * 1000, 1)
-    audit.event(
-        "sandbox_dry_run",
-        subject=name,
-        status="ok" if result.get("ok") else "error",
-        duration_ms=duration_ms,
-        source_chars=len(source),
-        n_rows=plan.get("n_rows"),
-        n_columns=len(plan.get("columns") or []),
-        outcome=(result.get("error") or {}).get("kind", "ok"),
-    )
-    result["duration_ms"] = duration_ms
+    result["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return result
 
 

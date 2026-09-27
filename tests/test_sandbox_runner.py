@@ -430,12 +430,55 @@ def test_hostile_mode_is_harder_to_survive():
 def test_an_unknown_mode_is_refused_by_name():
     p = subprocess.run(
         [sys.executable, "-m", "runner.run"],
-        input=json.dumps({"mode": "run", "source": "", "plan": a_plan()}),
+        input=json.dumps({"mode": "sideways", "source": "", "plan": a_plan()}),
         capture_output=True, text=True, cwd=str(SANDBOX), timeout=60,
     )
     payload = json.loads(p.stdout)
     assert payload["error"]["kind"] == "protocol"
     assert "dry-run" in payload["error"]["message"]
+
+
+def test_the_real_mode_needs_a_frame():
+    """`run` is the ETL container's path and carries a parquet frame. Without
+    one there is nothing to transform, and saying so beats a traceback."""
+    p = subprocess.run(
+        [sys.executable, "-m", "runner.run"],
+        input=json.dumps({"mode": "run", "source": "def transform(df): return df"}),
+        capture_output=True, text=True, cwd=str(SANDBOX), timeout=60,
+    )
+    payload = json.loads(p.stdout)
+    assert payload["error"]["kind"] == "protocol"
+    assert "no frame" in payload["error"]["message"]
+
+
+def test_the_real_mode_returns_no_preview():
+    """The invariant that separates a debugging aid from an export, asserted
+    where the frame is real. The dry run above returns rows because its rows
+    are fabricated."""
+    import base64
+    import io
+
+    import pandas as pd
+
+    buf = io.BytesIO()
+    sent = pd.DataFrame({"a": [1.0, 2.0]}, index=pd.Index([1000000, 1000007]))
+    sent.to_parquet(buf, index=True)
+
+    p = subprocess.run(
+        [sys.executable, "-m", "runner.run"],
+        input=json.dumps({
+            "mode": "run",
+            "source": "def transform(df):\n    return df.assign(b=1.0)\n",
+            "frame_parquet_b64": base64.b64encode(buf.getvalue()).decode(),
+        }),
+        capture_output=True, text=True, cwd=str(SANDBOX), timeout=120,
+    )
+    payload = json.loads(p.stdout)
+
+    assert payload["ok"], payload["error"]
+    assert payload["preview"] is None
+    assert payload["input_preview"] is None
+    assert payload["frame_parquet_b64"]
 
 
 def test_an_unreadable_request_still_produces_an_envelope():

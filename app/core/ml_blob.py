@@ -79,6 +79,22 @@ def exists(code: str) -> bool:
     return hit is not None
 
 
+def code_at_path(path: str) -> str | None:
+    """The model concept code at `path`, or None.
+
+    The job endpoints address a model by path while everything about a
+    transform is keyed by code, so one of the two has to be resolved.
+    """
+    check_path(path)
+    like = path.strip("/").replace("/", "\\\\")
+    raw = scalar(
+        f"SELECT concept_cd FROM {settings.db_schema}.concept_dimension "
+        f"WHERE concept_path LIKE '\\\\{like}\\\\%' "
+        "AND concept_blob IS NOT NULL AND concept_blob <> '' LIMIT 1;"
+    )
+    return raw or None
+
+
 def path_of(code: str) -> str | None:
     """The model's concept path, as the UI writes it: /ML/Foo/bar.
 

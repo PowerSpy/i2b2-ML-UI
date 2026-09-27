@@ -66,6 +66,28 @@ def exec_detached(container: str, *cmds: str, timeout: float = 30.0) -> Exec_Out
                                stderr=p.stderr))
 
 
+def exec_cp_out(container: str, container_path: str, host_path: Path,
+                timeout: float = 300.0) -> Exec_Output:
+    """Copy a path out of the container onto the host.
+
+    The other direction from `exec_cp`, and needed by the transform spooler:
+    the ETL container writes a request that this host has to read. Same
+    reasoning about `container_path` being a plain string - a POSIX path
+    through `pathlib` on Windows comes out backslash-separated and points at
+    nothing.
+    """
+    started = time.perf_counter()
+    p = subprocess.run(
+        ["docker", "cp", f"{container}:{container_path}", str(host_path)],
+        capture_output=True, text=True, timeout=timeout,
+    )
+
+    return _record("container_cp_out", container,
+                   f"docker cp {container_path} -> {host_path}", started,
+                   Exec_Output(returncode=p.returncode, stdout=p.stdout,
+                               stderr=p.stderr))
+
+
 def exec_cp(container: str, host_path: Path, container_path: str, timeout: float = 300.0) -> Exec_Output:
     """Copy a host path into the container.
 
