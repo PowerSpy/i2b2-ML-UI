@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Link } from "../lib/router.jsx";
+import { useSession } from "../lib/session.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import Button from "../ui/Button.jsx";
 import Callout from "../ui/Callout.jsx";
@@ -45,6 +46,9 @@ export default function NeedsAttention() {
 
 function AlertCard({ alert }) {
   const { startWatcher, refresh } = useWorkspace();
+  // The alert itself stays visible to everyone - a researcher needs to know
+  // their build will never run. Only the fix is withheld.
+  const { isCustodian } = useSession();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -74,7 +78,7 @@ function AlertCard({ alert }) {
         </Link>
       )}
 
-      {alert.action?.kind === "start-watcher" && (
+      {alert.action?.kind === "start-watcher" && isCustodian && (
         <div className="mt-3">
           <Button variant="danger" onClick={start} disabled={busy}>
             {busy ? "starting…" : alert.action.label}

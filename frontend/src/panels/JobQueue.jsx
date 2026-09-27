@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { apiPost } from "../lib/api.js";
 import { ago, firstLine } from "../lib/format.js";
+import { useSession } from "../lib/session.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Failed } from "../ui/Callout.jsx";
 import { Dot, jobTone } from "../ui/Status.jsx";
@@ -53,6 +54,7 @@ export default function JobQueue() {
 function JobRow({ job }) {
   const tone = jobTone(job.status);
   const { refresh } = useWorkspace();
+  const { isCustodian } = useSession();
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState(null);
 
@@ -99,7 +101,7 @@ function JobRow({ job }) {
         )}
       </p>
 
-      {job.status === "PROCESSING" && (
+      {job.status === "PROCESSING" && isCustodian && (
         <div className="mt-2">
           <button
             type="button"

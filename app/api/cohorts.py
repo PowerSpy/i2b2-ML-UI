@@ -5,6 +5,11 @@ from app.core import audit, cohorts
 
 router = APIRouter()
 
+# Custodian-only. These are collected on a second router so the policy lives in
+# app/api/router.py, in one place a reviewer can read, rather than being spread
+# across decorators in nine modules.
+custodian_router = APIRouter()
+
 
 class Cohort(BaseModel):
     id: int
@@ -39,7 +44,7 @@ def list_cohorts() -> list[Cohort]:
     return [Cohort(**c) for c in cohorts.list_cohorts()]
 
 
-@router.post("/cohorts", response_model=Cohort)
+@custodian_router.post("/cohorts", response_model=Cohort)
 def create_cohort(body: Cohort_In) -> Cohort:
     try:
         cohort_id = cohorts.create_cohort(body.name, body.concept_code)
@@ -57,7 +62,7 @@ def create_cohort(body: Cohort_In) -> Cohort:
     raise HTTPException(502, f"cohort {cohort_id} was created but is not listed")
 
 
-@router.delete("/cohorts", response_model=Cohort_Delete)
+@custodian_router.delete("/cohorts", response_model=Cohort_Delete)
 def wipe_cohorts() -> Cohort_Delete:
     try:
         deleted = cohorts.wipe_cohorts()
@@ -67,7 +72,7 @@ def wipe_cohorts() -> Cohort_Delete:
         raise HTTPException(502, f"cohort wipe failed: {e}")
 
 
-@router.delete("/cohorts/{cohort_id}", response_model=Cohort_Delete)
+@custodian_router.delete("/cohorts/{cohort_id}", response_model=Cohort_Delete)
 def delete_cohort(cohort_id: int) -> Cohort_Delete:
     try:
         deleted = cohorts.delete_cohorts([cohort_id])

@@ -15,7 +15,9 @@ decorator on each handler - is correct exactly until someone adds the
 thirty-first route and forgets.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.deps import custodian_only
 
 from app.api import (
     auth,
@@ -48,15 +50,57 @@ public_router.include_router(auth.router, tags=["auth"])
 
 # ---------------------------------------------------------------------------
 # Authenticated. Mounted in app/main.py behind current_principal.
+#
+# Two tiers below: anything on `api_router` is open to any signed-in account,
+# anything mounted with CUSTODIAN requires that role. The whole role policy is
+# these twenty lines, which is the point of collecting it here rather than
+# scattering `dependencies=` across decorators in nine modules.
 
 api_router = APIRouter()
 
-api_router.include_router(loader.router, tags=["load"])
-api_router.include_router(delete.router, tags=["delete"])
+CUSTODIAN = [Depends(custodian_only)]
+
+# --- open to any signed-in account -----------------------------------------
+# Reads, and the routes whose payload is narrowed by role rather than refused
+# outright (that narrowing lands with the suppression work).
 api_router.include_router(concepts.router, tags=["concepts"])
-api_router.include_router(cohorts.router, tags=["cohorts"])
-api_router.include_router(ml_models.router, tags=["ml-concepts"])
-api_router.include_router(watcher.router, tags=["watcher"])
-api_router.include_router(jobs.router, tags=["jobs"])
 api_router.include_router(predictions.router, tags=["predictions"])
 api_router.include_router(quality.router, tags=["quality"])
+api_router.include_router(loader.router, tags=["load"])          # verify-load
+api_router.include_router(cohorts.router, tags=["cohorts"])      # reads
+api_router.include_router(ml_models.router, tags=["ml-concepts"])  # reads
+api_router.include_router(watcher.router, tags=["watcher"])      # status only
+api_router.include_router(jobs.router, tags=["jobs"])            # the job list
+
+# --- custodian only --------------------------------------------------------
+# Everything that writes to the warehouse, destroys something, spawns a
+# process in a container, or reads raw container output.
+
+# The whole module: both routes truncate warehouse tables wholesale.
+api_router.include_router(delete.router, tags=["delete"], dependencies=CUSTODIAN)
+
+# Uploads are how patient rows enter, and the filename crosses into a shell.
+api_router.include_router(loader.custodian_router, tags=["load"],
+                          dependencies=CUSTODIAN)
+
+# Creating a patient set runs a generated script inside the ETL container;
+# deleting one is destructive and unrecoverable.
+api_router.include_router(cohorts.custodian_router, tags=["cohorts"],
+                          dependencies=CUSTODIAN)
+
+# /watcher/start spawns a daemon; /watcher/log is raw ETL stdout, which carries
+# failing SQL and sample rows.
+api_router.include_router(watcher.custodian_router, tags=["watcher"],
+                          dependencies=CUSTODIAN)
+
+# Build and apply are custodian-only *for now*. Both delete every fact under a
+# caller-supplied path before running (jobs.py:71-76), so until model ownership
+# exists they are a warehouse-wide delete primitive rather than a researcher
+# action. Ownership is the next step; these open up then.
+api_router.include_router(jobs.custodian_router, tags=["jobs"],
+                          dependencies=CUSTODIAN)
+
+# Same reasoning: a model config names the path that build then wipes, so
+# creating and deleting models waits for ownership too.
+api_router.include_router(ml_models.custodian_router, tags=["ml-concepts"],
+                          dependencies=CUSTODIAN)

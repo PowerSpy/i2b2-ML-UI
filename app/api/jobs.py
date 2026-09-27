@@ -6,6 +6,11 @@ from app.core.config import settings
 
 router = APIRouter()
 
+# Custodian-only. These are collected on a second router so the policy lives in
+# app/api/router.py, in one place a reviewer can read, rather than being spread
+# across decorators in nine modules.
+custodian_router = APIRouter()
+
 JOB_COLUMNS = ("job_type", "status", "output", "error_stack",
                "started_on", "completed_on")
 
@@ -75,7 +80,7 @@ def _wipe_warning(path: str) -> str:
     )
 
 
-@router.post("/jobs/build", response_model=Job_Out)
+@custodian_router.post("/jobs/build", response_model=Job_Out)
 def build(body: Build_In) -> Job_Out:
     # Without this the job queues happily and then dies in the worker with
     # "'NoneType' object has no attribute 'replace'", which says nothing about
@@ -101,7 +106,7 @@ def build(body: Build_In) -> Job_Out:
                    warnings=[_wipe_warning(body.path)])
 
 
-@router.post("/jobs/apply", response_model=Job_Out)
+@custodian_router.post("/jobs/apply", response_model=Job_Out)
 def apply(body: Apply_In) -> Job_Out:
     if not ml_blob.is_built_at_path(body.path):
         raise HTTPException(409, f"no trained model at {body.path} — build it first")
@@ -146,7 +151,7 @@ def list_jobs(
     return [_row_to_job(r) for r in rows]
 
 
-@router.post("/jobs/{job_id}/reset", response_model=Job_Out)
+@custodian_router.post("/jobs/{job_id}/reset", response_model=Job_Out)
 def reset_job(job_id: int) -> Job_Out:
     res = etl_api.post("/etl/update_job", json={
         "jobId": job_id, "pre": "PROCESSING", "post": "PENDING",

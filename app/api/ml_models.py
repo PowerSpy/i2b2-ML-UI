@@ -8,6 +8,11 @@ from app.core.config import settings
 
 router = APIRouter()
 
+# Custodian-only. These are collected on a second router so the policy lives in
+# app/api/router.py, in one place a reviewer can read, rather than being spread
+# across decorators in nine modules.
+custodian_router = APIRouter()
+
 CONCEPT_TYPE = "assertion"
 
 
@@ -160,7 +165,7 @@ def list_ml_concepts(path: str = settings.ml_root) -> list[Ml_Concept]:
     return [Ml_Concept(**c) for c in ml_blob.list_ml_concepts(path)]
 
 
-@router.post("/ml-concepts", response_model=Ml_Concept_Out)
+@custodian_router.post("/ml-concepts", response_model=Ml_Concept_Out)
 def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     if "'" in body.description:
         raise HTTPException(400, "description cannot contain an apostrophe")
@@ -247,7 +252,7 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
     return Ml_Concept_Out(code=body.code, warnings=warnings)
 
 
-@router.delete("/ml-concepts/{code}", response_model=Ml_Concept_Deleted)
+@custodian_router.delete("/ml-concepts/{code}", response_model=Ml_Concept_Deleted)
 def delete_ml_concept(code: str) -> Ml_Concept_Deleted:
     """Remove one model, instead of wiping every concept to be rid of it.
 

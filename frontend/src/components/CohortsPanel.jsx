@@ -2,7 +2,9 @@ import { useState } from "react";
 
 import { apiDelete, apiPost } from "../lib/api.js";
 import { count } from "../lib/format.js";
+import { useSession } from "../lib/session.jsx";
 import Button from "../ui/Button.jsx";
+import CustodianOnly from "../ui/Restricted.jsx";
 import Callout, { Empty } from "../ui/Callout.jsx";
 import { Status } from "../ui/Status.jsx";
 import { Table, Td, Th, ThHidden } from "../ui/Table.jsx";
@@ -131,6 +133,7 @@ function Definition({ def }) {
 
 /** The table plus the controls that change it. */
 export default function CohortsPanel({ cohorts, concepts, definitions, onChange, loading = false }) {
+  const { isCustodian } = useSession();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -172,7 +175,7 @@ export default function CohortsPanel({ cohorts, concepts, definitions, onChange,
       <CohortsTable
         cohorts={cohorts}
         definitions={definitions}
-        onDelete={remove}
+        onDelete={isCustodian ? remove : null}
         busy={busy}
         loading={loading}
       />
@@ -194,6 +197,7 @@ export default function CohortsPanel({ cohorts, concepts, definitions, onChange,
         </Callout>
       )}
 
+      <CustodianOnly explain="Creating and deleting patient sets is a custodian action. The table above is the full list either way.">
       <div className="space-y-3 border-t border-border-soft pt-5">
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-52">
@@ -279,6 +283,7 @@ export default function CohortsPanel({ cohorts, concepts, definitions, onChange,
           )}
         </div>
       )}
+      </CustodianOnly>
     </div>
   );
 }

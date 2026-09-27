@@ -3,6 +3,7 @@ import { count, plural } from "../../lib/format.js";
 import { useWorkspace } from "../../lib/workspace.jsx";
 import DataHealthCard from "../../panels/DataHealthCard.jsx";
 import DataQuality from "../../panels/DataQuality.jsx";
+import CustodianOnly from "../../ui/Restricted.jsx";
 import WatcherLog from "../../panels/WatcherLog.jsx";
 import { Card, CardHeader } from "../../ui/Card.jsx";
 import Callout from "../../ui/Callout.jsx";
@@ -105,8 +106,11 @@ export default function DataHealth() {
         </Note>
       </Card>
 
-      <WatcherLog />
+      <CustodianOnly>
+        <WatcherLog />
+      </CustodianOnly>
 
+      <CustodianOnly>
       <Card className="border-danger-edge">
         <CardHeader
           title="Danger zone"
@@ -156,6 +160,7 @@ export default function DataHealth() {
           </Note>
         </div>
       </Card>
+      </CustodianOnly>
     </div>
   );
 }

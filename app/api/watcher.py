@@ -9,6 +9,11 @@ from app.core.docker_exec import exec, exec_detached
 
 router = APIRouter()
 
+# Custodian-only. These are collected on a second router so the policy lives in
+# app/api/router.py, in one place a reviewer can read, rather than being spread
+# across decorators in nine modules.
+custodian_router = APIRouter()
+
 WATCHER_CMD = "python -m i2b2_cdi.job.jobWatcher"
 LOG = "/tmp/jobwatcher.log"
 
@@ -67,7 +72,7 @@ def watcher_status() -> Watcher_Status:
                           detail="\n".join(lines[1:]))
 
 
-@router.post("/watcher/start", response_model=Watcher_Status)
+@custodian_router.post("/watcher/start", response_model=Watcher_Status)
 def watcher_start() -> Watcher_Status:
     current = watcher_status()
     if current.running:
@@ -83,7 +88,7 @@ def watcher_start() -> Watcher_Status:
     return watcher_status()
 
 
-@router.get("/watcher/log", response_model=Watcher_Log)
+@custodian_router.get("/watcher/log", response_model=Watcher_Log)
 def watcher_log(
     lines: int = Query(100, ge=1, le=settings.max_log_lines),
 ) -> Watcher_Log:

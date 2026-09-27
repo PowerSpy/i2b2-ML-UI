@@ -10,6 +10,11 @@ from app.core.upload import safe_upload_name, write_capped
 
 router = APIRouter()
 
+# Custodian-only. These are collected on a second router so the policy lives in
+# app/api/router.py, in one place a reviewer can read, rather than being spread
+# across decorators in nine modules.
+custodian_router = APIRouter()
+
 CONTAINER = settings.container
 # The ETL container has psql but no local server, so counts run on the DB itself.
 DB_CONTAINER = settings.db_container
@@ -126,12 +131,12 @@ def _stage_and_load(kind: str, file: UploadFile, extra_args: str = "") -> Load_O
         exec(CONTAINER, f"rm -rf -- {shlex.quote(container_path)}")
 
 
-@router.post("/load-concepts", response_model=Load_Out)
+@custodian_router.post("/load-concepts", response_model=Load_Out)
 def load_concepts(file: UploadFile = File(...)) -> Load_Out:
     return _stage_and_load("concept", file)
 
 
-@router.post("/load-facts", response_model=Load_Out)
+@custodian_router.post("/load-facts", response_model=Load_Out)
 def load_facts(file: UploadFile = File(...), mrn_are_patient_numbers = True) -> Load_Out:
     return _stage_and_load(
         "fact", file,

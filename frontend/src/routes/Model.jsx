@@ -9,6 +9,7 @@ import { href, Link, navigate } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import PipelineRailStub from "../panels/PipelineRailStub.jsx";
 import Button from "../ui/Button.jsx";
+import CustodianOnly from "../ui/Restricted.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
 import Callout, { Empty, Failed, NotReported } from "../ui/Callout.jsx";
 import { Pill, Status } from "../ui/Status.jsx";
@@ -161,7 +162,9 @@ export default function Model({ code }) {
           usedCohorts={usedCohorts}
         />
         <Reproducibility usedCohorts={usedCohorts} config={config} />
-        <DeleteModel model={model} project={project} />
+        <CustodianOnly>
+          <DeleteModel model={model} project={project} />
+        </CustodianOnly>
       </RightRail>
     </>
   );

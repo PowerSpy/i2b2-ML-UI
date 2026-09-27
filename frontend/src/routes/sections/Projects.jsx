@@ -6,6 +6,7 @@ import { useWorkspace } from "../../lib/workspace.jsx";
 import FileLoader from "../../components/FileLoader.jsx";
 import ProjectCard from "../../panels/ProjectCard.jsx";
 import Button from "../../ui/Button.jsx";
+import CustodianOnly from "../../ui/Restricted.jsx";
 import { Card, CardHeader } from "../../ui/Card.jsx";
 import Callout, { Empty, Failed } from "../../ui/Callout.jsx";
 import { Heading, Mono, Note } from "../../ui/Text.jsx";
@@ -113,6 +114,7 @@ function NewProject({ onLoaded }) {
         not exit status.
       </Callout>
 
+      <CustodianOnly explain="Creating a project means loading a concepts CSV, which is a custodian action.">
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <FileLoader
           endpoint="/load-concepts"
@@ -126,6 +128,7 @@ function NewProject({ onLoaded }) {
           onLoaded={onLoaded}
         />
       </div>
+      </CustodianOnly>
     </Card>
   );
 }

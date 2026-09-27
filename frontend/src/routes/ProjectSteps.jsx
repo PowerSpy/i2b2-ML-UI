@@ -9,6 +9,7 @@ import { count, plural } from "../lib/format.js";
 import { href, Link } from "../lib/router.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
+import CustodianOnly from "../ui/Restricted.jsx";
 import Callout, { Empty } from "../ui/Callout.jsx";
 import { Mono, Note, Num, SectionLabel } from "../ui/Text.jsx";
 
@@ -49,6 +50,7 @@ export function LoadStep({ project }) {
         actually gained rather than exit status.
       </Callout>
 
+      <CustodianOnly explain="Loading data is a custodian action. Ask one to add a dataset to this project.">
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <FileLoader
           endpoint="/load-concepts"
@@ -62,6 +64,7 @@ export function LoadStep({ project }) {
           onLoaded={ws.refresh}
         />
       </div>
+      </CustodianOnly>
     </Card>
   );
 }
@@ -132,47 +135,51 @@ export function DefineStep({ project, onCreated, editingCode, onEdit }) {
           at least two levels deep for its parent to be pickable.
         </Empty>
       ) : (
-        <div className="mt-5">
-          <ModelForm
-            // Remount on a change of target so the form's initial state is
-            // re-derived; prefill lives in useState initialisers.
-            key={editingCode ?? "new"}
-            cohorts={ws.cohorts}
-            tree={project.paths}
-            concepts={project.concepts}
-            editing={editing}
-            onCancelEdit={() => onEdit?.(null)}
-            // Models land under their project rather than one shared folder,
-            // which is what let two studies collide in a flat namespace.
-            pathPrefix={`/ML/${project.id}`}
-            onCreated={(code) => {
-              onCreated?.(code);
-              ws.refresh();
-            }}
-          />
+        // Both halves are gated together: the chips below only load a config
+        // into the form above, so without the form they do nothing.
+        <CustodianOnly explain="Saving a model config is a custodian action until per-researcher model ownership lands.">
+          <div className="mt-5">
+            <ModelForm
+              // Remount on a change of target so the form's initial state is
+              // re-derived; prefill lives in useState initialisers.
+              key={editingCode ?? "new"}
+              cohorts={ws.cohorts}
+              tree={project.paths}
+              concepts={project.concepts}
+              editing={editing}
+              onCancelEdit={() => onEdit?.(null)}
+              // Models land under their project rather than one shared folder,
+              // which is what let two studies collide in a flat namespace.
+              pathPrefix={`/ML/${project.id}`}
+              onCreated={(code) => {
+                onCreated?.(code);
+                ws.refresh();
+              }}
+            />
 
-          {!editing && project.models.length > 0 && (
-            <div className="mt-6 border-t border-border-soft pt-5">
-              <SectionLabel className="mb-2.5">Edit an existing model</SectionLabel>
-              <div className="flex flex-wrap gap-2">
-                {project.models.map((m) => (
-                  <button
-                    key={m.code}
-                    type="button"
-                    onClick={() => onEdit?.(m.code)}
-                    className="min-h-[44px] rounded-btn border border-border-strong px-3 font-mono text-[12px] text-text-3 hover:border-text-muted hover:text-text"
-                  >
-                    {m.code}
-                  </button>
-                ))}
+            {!editing && project.models.length > 0 && (
+              <div className="mt-6 border-t border-border-soft pt-5">
+                <SectionLabel className="mb-2.5">Edit an existing model</SectionLabel>
+                <div className="flex flex-wrap gap-2">
+                  {project.models.map((m) => (
+                    <button
+                      key={m.code}
+                      type="button"
+                      onClick={() => onEdit?.(m.code)}
+                      className="min-h-[44px] rounded-btn border border-border-strong px-3 font-mono text-[12px] text-text-3 hover:border-text-muted hover:text-text"
+                    >
+                      {m.code}
+                    </button>
+                  ))}
+                </div>
+                <Note className="mt-2">
+                  Loads that model&apos;s stored config into the form above, so a
+                  one-field change does not mean retyping the rest.
+                </Note>
               </div>
-              <Note className="mt-2">
-                Loads that model&apos;s stored config into the form above, so a
-                one-field change does not mean retyping the rest.
-              </Note>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </CustodianOnly>
       )}
     </Card>
   );
@@ -235,13 +242,15 @@ export function TrainStep({ project, selected, onSelect }) {
 
             {model && (
               <>
-                <JobRunner
-                  endpoint="/jobs/build"
-                  body={{ path: model.path }}
-                  label="Build model"
-                  watcherRunning={!!ws.watcher?.running}
-                  onDone={ws.refresh}
-                />
+                <CustodianOnly explain="Queueing a build is a custodian action: a build deletes every fact under the model's path before it runs.">
+                  <JobRunner
+                    endpoint="/jobs/build"
+                    body={{ path: model.path }}
+                    label="Build model"
+                    watcherRunning={!!ws.watcher?.running}
+                    onDone={ws.refresh}
+                  />
+                </CustodianOnly>
 
                 {model.is_built && (
                   <div className="border-t border-border-soft pt-5">
@@ -359,6 +368,7 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                   hint="Anchors predictions in time. Defaults to the model's own label paths; cannot be empty — the engine joins it into a WHERE clause with no fallback."
                 />
 
+                <CustodianOnly explain="Applying a model writes prediction facts, and deletes the existing ones first. Custodian only for now.">
                 <JobRunner
                   endpoint="/jobs/apply"
                   body={{
@@ -374,6 +384,7 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                   watcherRunning={!!ws.watcher?.running}
                   onDone={ws.refresh}
                 />
+                </CustodianOnly>
 
                 <div className="border-t border-border-soft pt-5">
                   <PredictionsPanel

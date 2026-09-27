@@ -14,13 +14,12 @@ from fastapi.testclient import TestClient
 
 PASSWORD = "correct horse battery staple"
 
-# PUBLIC   - reachable with no session at all
-# SESSION  - requires a signed-in user of any role
-#
-# Roles arrive in step 4; until then every account is a custodian and this
-# column is the whole policy.
+# PUBLIC     - reachable with no session at all
+# SESSION    - any signed-in account
+# CUSTODIAN  - custodian role required
 PUBLIC = "public"
 SESSION = "session"
+CUSTODIAN = "custodian"
 
 ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/health"): PUBLIC,
@@ -30,34 +29,34 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # current_principal itself and 401s for an anonymous caller.
     ("GET", "/api/auth/me"): PUBLIC,
 
-    ("POST", "/api/load-concepts"): SESSION,
-    ("POST", "/api/load-facts"): SESSION,
+    ("POST", "/api/load-concepts"): CUSTODIAN,
+    ("POST", "/api/load-facts"): CUSTODIAN,
     ("GET", "/api/verify-load"): SESSION,
-    ("DELETE", "/api/delete-concepts"): SESSION,
-    ("DELETE", "/api/delete-facts"): SESSION,
+    ("DELETE", "/api/delete-concepts"): CUSTODIAN,
+    ("DELETE", "/api/delete-facts"): CUSTODIAN,
     ("GET", "/api/concepts"): SESSION,
     ("GET", "/api/concept-tree"): SESSION,
     ("GET", "/api/cohorts"): SESSION,
-    ("POST", "/api/cohorts"): SESSION,
-    ("DELETE", "/api/cohorts"): SESSION,
-    ("DELETE", "/api/cohorts/{cohort_id}"): SESSION,
+    ("POST", "/api/cohorts"): CUSTODIAN,
+    ("DELETE", "/api/cohorts"): CUSTODIAN,
+    ("DELETE", "/api/cohorts/{cohort_id}"): CUSTODIAN,
     ("GET", "/api/cohorts/{cohort_id}/definition"): SESSION,
     ("GET", "/api/cohorts/{cohort_id}/size"): SESSION,
     ("GET", "/api/data-quality"): SESSION,
     ("GET", "/api/ml-model-types"): SESSION,
     ("GET", "/api/ml-concepts"): SESSION,
-    ("POST", "/api/ml-concepts"): SESSION,
-    ("DELETE", "/api/ml-concepts/{code}"): SESSION,
+    ("POST", "/api/ml-concepts"): CUSTODIAN,
+    ("DELETE", "/api/ml-concepts/{code}"): CUSTODIAN,
     ("GET", "/api/ml-concepts/{code}/config"): SESSION,
     ("GET", "/api/ml-concepts/{code}/metrics"): SESSION,
     ("GET", "/api/ml-concepts/{code}/plots"): SESSION,
     ("GET", "/api/watcher"): SESSION,
-    ("POST", "/api/watcher/start"): SESSION,
-    ("GET", "/api/watcher/log"): SESSION,
-    ("POST", "/api/jobs/build"): SESSION,
-    ("POST", "/api/jobs/apply"): SESSION,
+    ("POST", "/api/watcher/start"): CUSTODIAN,
+    ("GET", "/api/watcher/log"): CUSTODIAN,
+    ("POST", "/api/jobs/build"): CUSTODIAN,
+    ("POST", "/api/jobs/apply"): CUSTODIAN,
     ("GET", "/api/jobs"): SESSION,
-    ("POST", "/api/jobs/{job_id}/reset"): SESSION,
+    ("POST", "/api/jobs/{job_id}/reset"): CUSTODIAN,
     ("GET", "/api/predictions/{code}"): SESSION,
 }
 
@@ -101,10 +100,35 @@ def test_policy_has_no_stale_entries(app_home):
     assert not missing, f"ROUTE_POLICY lists routes the app does not serve: {missing}"
 
 
-@pytest.mark.parametrize(
-    "method,path",
-    sorted(p for p, kind in ROUTE_POLICY.items() if kind == SESSION),
-)
+NEEDS_SESSION = sorted(p for p, kind in ROUTE_POLICY.items() if kind != PUBLIC)
+CUSTODIAN_ONLY = sorted(p for p, kind in ROUTE_POLICY.items() if kind == CUSTODIAN)
+
+
+def _concrete(path: str) -> str:
+    return (path.replace("{cohort_id}", "1")
+                .replace("{job_id}", "1")
+                .replace("{code}", "x"))
+
+
+def _sign_in(role, tolerate_errors: bool = False):
+    """A client signed in as `role`.
+
+    `tolerate_errors` turns a handler exception into a 500 response instead of
+    re-raising. Needed where the assertion is about the *status* and the
+    handler legitimately blows up against a warehouse that is not there - an
+    IndexError from psql returning nothing is not an authorisation result.
+    """
+    from app.core import auth, passwords
+    from app.main import app
+
+    auth.create_user("u", passwords.hash_password(PASSWORD), role)
+    client = TestClient(app, raise_server_exceptions=not tolerate_errors)
+    res = client.post("/api/auth/login", json={"username": "u", "password": PASSWORD})
+    assert res.status_code == 200, res.text
+    return client
+
+
+@pytest.mark.parametrize("method,path", NEEDS_SESSION)
 def test_session_routes_refuse_anonymous_callers(app_home, method, path, fake_exec):
     """The point of the fail-closed mount, asserted route by route.
 
@@ -120,10 +144,7 @@ def test_session_routes_refuse_anonymous_callers(app_home, method, path, fake_ex
     # would pass without testing anything.
     auth.create_user("alice", passwords.hash_password(PASSWORD), Role.CUSTODIAN)
 
-    concrete = (path.replace("{cohort_id}", "1")
-                    .replace("{job_id}", "1")
-                    .replace("{code}", "x"))
-    res = TestClient(app).request(method, concrete)
+    res = TestClient(app).request(method, _concrete(path))
 
     assert res.status_code == 401, (
         f"{method} {path} answered {res.status_code} for an anonymous caller"
@@ -140,3 +161,46 @@ def test_public_routes_are_reachable_anonymously(app_home):
     assert client.post("/api/auth/login",
                        json={"username": "nobody", "password": "x" * 12}
                        ).status_code in (401, 503)
+
+
+@pytest.mark.parametrize("method,path", CUSTODIAN_ONLY)
+def test_custodian_routes_refuse_researchers(app_home, method, path, fake_exec):
+    """403, and - the part that matters - *before* the side effect.
+
+    A check that runs after the handler has already copied a file into the
+    container or queued a job has not prevented anything. `fake_exec` records
+    every container call, and this asserts none happened.
+    """
+    from app.core.authz import Role
+
+    client = _sign_in(Role.RESEARCHER)
+    res = client.request(method, _concrete(path),
+                         headers={"X-CSRF-Token": client.cookies.get("i2b2ml_csrf", "")})
+
+    assert res.status_code == 403, (
+        f"{method} {path} answered {res.status_code} for a researcher"
+    )
+    assert not fake_exec, (
+        f"{method} {path} reached a container before authz rejected it: {fake_exec}"
+    )
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    sorted(p for p, kind in ROUTE_POLICY.items() if kind == SESSION),
+)
+def test_session_routes_allow_researchers(app_home, method, path, fake_exec):
+    """The other half: a researcher must not be locked out of the reads.
+
+    A role that cannot do anything is not a role, it is a disabled account.
+    These may still 500 against a stopped warehouse - what matters is that the
+    answer is not 403.
+    """
+    from app.core.authz import Role
+
+    client = _sign_in(Role.RESEARCHER, tolerate_errors=True)
+    res = client.request(method, _concrete(path),
+                         headers={"X-CSRF-Token": client.cookies.get("i2b2ml_csrf", "")})
+
+    assert res.status_code != 403, f"{method} {path} refused a researcher"
+    assert res.status_code != 401, f"{method} {path} did not accept the session"
