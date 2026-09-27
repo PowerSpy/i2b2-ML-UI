@@ -50,6 +50,11 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/data-quality"): SESSION,
     ("GET", "/api/data-dictionary"): SESSION,
     ("GET", "/api/ml-concepts/{code}/data-dictionary"): SESSION,
+    # Executes caller-supplied Python - but only ever against fabricated rows
+    # generated from the suppressed dictionary. OWNED because a dry run costs
+    # a container, not because the frame is confidential.
+    ("POST", "/api/ml-concepts/{code}/transform/dry-run"): OWNED,
+    ("GET", "/api/ml-concepts/{code}/transform/frame"): OWNED,
     ("GET", "/api/ml-model-types"): SESSION,
     ("GET", "/api/ml-concepts"): SESSION,
     ("POST", "/api/ml-concepts"): OWNED,

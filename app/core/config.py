@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # now and by the metric suppression later.
     min_cell_size: int = 11
 
+    # The image a researcher's feature transform runs in, built by
+    # `sandbox/build.sh`. Pinned to a tag rather than a digest because the
+    # build script's version check against the ETL container is the thing that
+    # makes the image trustworthy, and it re-runs on every build.
+    sandbox_image: str = "i2b2-ml-sandbox:local"
+
     app_db: Path = CONFIG_FILE.parent / "var" / "app.db"
     audit_dir: Path = CONFIG_FILE.parent / "var" / "audit"
     audit_enabled: bool = True

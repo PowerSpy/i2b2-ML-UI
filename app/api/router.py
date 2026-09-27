@@ -31,6 +31,7 @@ from app.api import (
     ml_models,
     predictions,
     quality,
+    transform,
     watcher,
 )
 
@@ -70,6 +71,10 @@ api_router.include_router(quality.router, tags=["quality"])
 # Aggregate shapes only, already suppressed. It is what lets a researcher
 # write code against data they cannot see.
 api_router.include_router(dictionary.router, tags=["dictionary"])
+# Running a researcher's code - but only ever against fabricated rows built
+# from that same suppressed dictionary. The real-data path is not here and
+# will not be: it runs inside the ETL container, behind the job queue.
+api_router.include_router(transform.router, tags=["transform"])
 api_router.include_router(loader.router, tags=["load"])          # verify-load
 api_router.include_router(cohorts.router, tags=["cohorts"])      # reads
 api_router.include_router(ml_models.router, tags=["ml-concepts"])  # reads

@@ -205,8 +205,12 @@ def describe(scope: Scope, min_cell: int = MIN_CELL) -> dict:
     )[0]["n"])
 
     stats = _numeric_stats(where)
-    levels = _levels(where)
     names = _concept_names(scope.codes)
+    # The kind has to be settled before the levels query, so it can ask only
+    # about the columns that have levels rather than enumerating every distinct
+    # value of every continuous column.
+    levels = _levels(where, [c for c in scope.codes
+                             if _kind(stats.get(c, {})) == "categorical"])
 
     columns = []
     for code in scope.codes:
@@ -269,21 +273,61 @@ def _numeric_stats(where: str) -> dict[str, dict]:
     return {r["code"]: r for r in rows}
 
 
-def _levels(where: str) -> dict[str, list[dict]]:
-    """Distinct text values per concept, for the categorical columns."""
+def _levels(where: str, codes: list[str]) -> dict[str, list[dict]]:
+    """Distinct values per concept, for the categorical columns.
+
+    **Numeric values count as levels too.** `_column` calls any column with few
+    distinct values categorical whatever its declared type, and this dataset is
+    full of integer-coded ones - sex, cp, fbs, restecg, exang, slope, ca, thal
+    are all small integers. Reading only `tval_char` left every one of them
+    described by nothing at all: categorical, so no quantiles, and no levels
+    either because the values were in `nval_num`.
+
+    `::float8::text` rather than `::text` because the column is `numeric` and
+    a plain cast renders 1 as `1.00000`, which would then be the level name a
+    researcher writes code against.
+    """
+    if not codes:
+        return {}
+    # Only the categorical columns. A continuous column would return one row
+    # per distinct value, which is both useless here and the bulk of the work.
+    joined = ", ".join(f"'{check_code(c)}'" for c in codes)
+    val = "coalesce(tval_char, nval_num::float8::text)"
     rows = query(
         f"WITH lv AS ({quality.last_value_cte(where)}) "
-        "SELECT concept_cd AS code, tval_char AS value, count(*) AS n "
-        "FROM lv WHERE tval_char IS NOT NULL AND tval_char <> '' "
-        "GROUP BY concept_cd, tval_char "
+        f"SELECT concept_cd AS code, {val} AS value, "
+        "       count(*) AS n, "
+        "       count(*) FILTER (WHERE tval_char IS NULL) AS n_numeric "
+        f"FROM lv WHERE concept_cd IN ({joined}) "
+        f"  AND {val} IS NOT NULL AND {val} <> '' "
+        f"GROUP BY concept_cd, {val} "
         "ORDER BY concept_cd, count(*) DESC;"
     )
     out: dict[str, list[dict]] = {}
     for r in rows:
-        out.setdefault(r["code"], []).append(
-            {"value": r["value"], "count": _int(r["n"])}
-        )
+        out.setdefault(r["code"], []).append({
+            "value": r["value"],
+            "count": _int(r["n"]),
+            # So the synthetic frame reproduces the dtype. A level materialised
+            # as "1" where the real frame holds 1.0 makes every comparison in a
+            # transform behave differently in dev than in production.
+            "numeric": _int(r.get("n_numeric")) >= _int(r["n"]),
+        })
     return out
+
+
+def _kind(s) -> str:
+    """Whether a column reads as a level set or a range.
+
+    Split out from `_column` because `describe` has to know this *before* it
+    queries levels - see `_levels`.
+    """
+    n_numeric = _int(s.get("n_numeric"))
+    n_text = _int(s.get("n_text"))
+    n_distinct = _int(s.get("n_distinct"))
+    return "categorical" if (
+        n_text > n_numeric or (0 < n_distinct <= CATEGORICAL_MAX_DISTINCT and n_numeric > 0)
+    ) else "numeric"
 
 
 def _column(code, name, s, levels, patients_in_scope, min_cell) -> dict:
@@ -295,9 +339,7 @@ def _column(code, name, s, levels, patients_in_scope, min_cell) -> dict:
     # A code carrying both numeric and text rows pivots to NaN for the text
     # ones - an invisible data bug the build never mentions, so it is named.
     mixed = n_numeric > 0 and n_text > 0
-    kind = "categorical" if (
-        n_text > n_numeric or (0 < n_distinct <= CATEGORICAL_MAX_DISTINCT and n_numeric > 0)
-    ) else "numeric"
+    kind = _kind(s)
 
     col = {
         "code": code,

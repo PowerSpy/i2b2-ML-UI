@@ -7,3 +7,16 @@
 # makes HTTP calls with it - the app uses requests (see app/core/etl_api.py).
 pytest>=8.0
 httpx>=0.27
+
+# The sandbox runner is tested by driving `sandbox/runner/run.py` as a real
+# subprocess (tests/test_sandbox_runner.py), which needs the libraries the
+# sandbox image carries. **These are test-only and must never reach the app.**
+# Nothing in `app/` may import pandas: the host process holds the container
+# credentials and its only job with a frame is to describe it in aggregate.
+#
+# Unpinned on purpose. The versions that matter are the ones in
+# `sandbox/requirements.txt`, which `sandbox/build.sh` pins to the live ETL
+# container; pinning here as well would invite someone to keep the two in step
+# by hand, which is exactly what the probe exists to avoid.
+pandas
+numpy

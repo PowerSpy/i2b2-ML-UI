@@ -1,0 +1,21 @@
+# Pinned to whatever `i2b2-etl` runs. Nothing else is acceptable.
+#
+# The dev loop's entire promise is "if it runs here it runs there", and a
+# pandas minor bump is enough to break it: `groupby` observed-default, silent
+# downcasting, and copy-on-write all changed behaviour between 1.x and 2.x
+# without changing an API. A transform validated against the wrong version
+# reports success and then fails on a job row.
+#
+# UNPROBED is not a version. `build.sh` refuses to build while it is here.
+# Fill this file by running:
+#
+#     ./sandbox/build.sh probe
+#
+# which reads the versions out of the running ETL container and rewrites this
+# file. Do not hand-edit the pins to make a build go through - the point of the
+# refusal is that a guess is worse than a stop.
+
+pandas==UNPROBED
+numpy==UNPROBED
+scikit-learn==UNPROBED
+scipy==UNPROBED

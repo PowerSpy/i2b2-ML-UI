@@ -9,6 +9,10 @@ router = APIRouter()
 class Level(BaseModel):
     value: str
     count: int
+    # Whether the underlying value is a number. Integer-coded levels are the
+    # common case here, and the synthetic frame has to reproduce the dtype or
+    # every comparison in a transform behaves differently in dev.
+    numeric: bool = False
 
 
 class Column(BaseModel):
