@@ -7,6 +7,7 @@ import PathPicker from "../components/PathPicker.jsx";
 import PredictionsPanel from "../components/PredictionsPanel.jsx";
 import { count, plural } from "../lib/format.js";
 import { href, Link } from "../lib/router.jsx";
+import { useSession } from "../lib/session.jsx";
 import { useWorkspace } from "../lib/workspace.jsx";
 import { Card, CardHeader } from "../ui/Card.jsx";
 import CustodianOnly from "../ui/Restricted.jsx";
@@ -104,6 +105,7 @@ export function CohortsStep() {
 /** Step 3. Which concepts are inputs, which is the answer. Trains nothing. */
 export function DefineStep({ project, onCreated, editingCode, onEdit }) {
   const ws = useWorkspace();
+  const { user, isResearcher } = useSession();
   const editingModel = project.models.find((m) => m.code === editingCode) ?? null;
   const editing = editingModel
     ? { model: editingModel, config: ws.configs[editingModel.code]?.data ?? null }
@@ -135,10 +137,7 @@ export function DefineStep({ project, onCreated, editingCode, onEdit }) {
           at least two levels deep for its parent to be pickable.
         </Empty>
       ) : (
-        // Both halves are gated together: the chips below only load a config
-        // into the form above, so without the form they do nothing.
-        <CustodianOnly explain="Saving a model config is a custodian action until per-researcher model ownership lands.">
-          <div className="mt-5">
+        <div className="mt-5">
             <ModelForm
               // Remount on a change of target so the form's initial state is
               // re-derived; prefill lives in useState initialisers.
@@ -150,7 +149,12 @@ export function DefineStep({ project, onCreated, editingCode, onEdit }) {
               onCancelEdit={() => onEdit?.(null)}
               // Models land under their project rather than one shared folder,
               // which is what let two studies collide in a flat namespace.
-              pathPrefix={`/ML/${project.id}`}
+              // A researcher's models must live under their own namespace:
+              // the server enforces it and 403s on anything else, so the form
+              // has to agree with it rather than discover it on submit.
+              pathPrefix={
+                isResearcher ? `/ML/u/${user.username}` : `/ML/${project.id}`
+              }
               onCreated={(code) => {
                 onCreated?.(code);
                 ws.refresh();
@@ -161,7 +165,8 @@ export function DefineStep({ project, onCreated, editingCode, onEdit }) {
               <div className="mt-6 border-t border-border-soft pt-5">
                 <SectionLabel className="mb-2.5">Edit an existing model</SectionLabel>
                 <div className="flex flex-wrap gap-2">
-                  {project.models.map((m) => (
+                  {/* Only models this account may actually save over. */}
+                  {project.models.filter((m) => m.mine).map((m) => (
                     <button
                       key={m.code}
                       type="button"
@@ -178,10 +183,29 @@ export function DefineStep({ project, onCreated, editingCode, onEdit }) {
                 </Note>
               </div>
             )}
-          </div>
-        </CustodianOnly>
+        </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Why a job control is missing.
+ *
+ * Shown rather than hidden: the model is right there in the dropdown and its
+ * metrics are readable, so a silently absent button would read as a bug. The
+ * reason is worth stating too - submitting deletes facts, which is why this
+ * is tied to ownership rather than to role.
+ */
+function NotYours({ model, verb }) {
+  return (
+    <Callout tone="neutral" title={`you cannot ${verb} this model`}>
+      {model.owner
+        ? <>It belongs to <Mono className="text-text-2">{model.owner}</Mono>.</>
+        : "It has no recorded owner, so only a custodian can."}{" "}
+      Submitting deletes every fact under <Mono>{model.path}</Mono> before it
+      runs, so it is restricted to whoever owns the model.
+    </Callout>
   );
 }
 
@@ -242,7 +266,7 @@ export function TrainStep({ project, selected, onSelect }) {
 
             {model && (
               <>
-                <CustodianOnly explain="Queueing a build is a custodian action: a build deletes every fact under the model's path before it runs.">
+                {model.mine ? (
                   <JobRunner
                     endpoint="/jobs/build"
                     body={{ path: model.path }}
@@ -250,7 +274,9 @@ export function TrainStep({ project, selected, onSelect }) {
                     watcherRunning={!!ws.watcher?.running}
                     onDone={ws.refresh}
                   />
-                </CustodianOnly>
+                ) : (
+                  <NotYours model={model} verb="build" />
+                )}
 
                 {model.is_built && (
                   <div className="border-t border-border-soft pt-5">
@@ -368,7 +394,7 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                   hint="Anchors predictions in time. Defaults to the model's own label paths; cannot be empty — the engine joins it into a WHERE clause with no fallback."
                 />
 
-                <CustodianOnly explain="Applying a model writes prediction facts, and deletes the existing ones first. Custodian only for now.">
+                {model.mine ? (
                 <JobRunner
                   endpoint="/jobs/apply"
                   body={{
@@ -384,7 +410,9 @@ export function ApplyStep({ project, selected, onSelect, targetCohort, onTarget,
                   watcherRunning={!!ws.watcher?.running}
                   onDone={ws.refresh}
                 />
-                </CustodianOnly>
+                ) : (
+                  <NotYours model={model} verb="apply" />
+                )}
 
                 <div className="border-t border-border-soft pt-5">
                   <PredictionsPanel

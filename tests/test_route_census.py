@@ -17,9 +17,14 @@ PASSWORD = "correct horse battery staple"
 # PUBLIC     - reachable with no session at all
 # SESSION    - any signed-in account
 # CUSTODIAN  - custodian role required
+# OWNED      - any signed-in account, but the handler refuses a resource the
+#              caller does not own. Cannot be decided from the route alone,
+#              so the census checks reachability and test_ownership.py checks
+#              the rule.
 PUBLIC = "public"
 SESSION = "session"
 CUSTODIAN = "custodian"
+OWNED = "owned"
 
 ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/health"): PUBLIC,
@@ -45,16 +50,16 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/data-quality"): SESSION,
     ("GET", "/api/ml-model-types"): SESSION,
     ("GET", "/api/ml-concepts"): SESSION,
-    ("POST", "/api/ml-concepts"): CUSTODIAN,
-    ("DELETE", "/api/ml-concepts/{code}"): CUSTODIAN,
+    ("POST", "/api/ml-concepts"): OWNED,
+    ("DELETE", "/api/ml-concepts/{code}"): OWNED,
     ("GET", "/api/ml-concepts/{code}/config"): SESSION,
     ("GET", "/api/ml-concepts/{code}/metrics"): SESSION,
     ("GET", "/api/ml-concepts/{code}/plots"): SESSION,
     ("GET", "/api/watcher"): SESSION,
     ("POST", "/api/watcher/start"): CUSTODIAN,
     ("GET", "/api/watcher/log"): CUSTODIAN,
-    ("POST", "/api/jobs/build"): CUSTODIAN,
-    ("POST", "/api/jobs/apply"): CUSTODIAN,
+    ("POST", "/api/jobs/build"): OWNED,
+    ("POST", "/api/jobs/apply"): OWNED,
     ("GET", "/api/jobs"): SESSION,
     ("POST", "/api/jobs/{job_id}/reset"): CUSTODIAN,
     ("GET", "/api/predictions/{code}"): SESSION,
@@ -101,6 +106,7 @@ def test_policy_has_no_stale_entries(app_home):
 
 
 NEEDS_SESSION = sorted(p for p, kind in ROUTE_POLICY.items() if kind != PUBLIC)
+OWNED_ROUTES = sorted(p for p, kind in ROUTE_POLICY.items() if kind == OWNED)
 CUSTODIAN_ONLY = sorted(p for p, kind in ROUTE_POLICY.items() if kind == CUSTODIAN)
 
 

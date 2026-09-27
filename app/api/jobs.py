@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, field_validator
 
-from app.core import audit, cohorts, db, etl_api, ml_blob
+from app.api.deps import current_principal
+from app.core import audit, authz, cohorts, db, etl_api, ml_blob
+from app.core.auth import Principal
 from app.core.config import settings
 
 router = APIRouter()
@@ -18,11 +20,21 @@ JOB_COLUMNS = ("job_type", "status", "output", "error_stack",
 class Build_In(BaseModel):
     path: str
 
+    @field_validator("path")
+    @classmethod
+    def _safe(cls, v: str) -> str:
+        return db.check_path(v)
+
 
 class Apply_In(BaseModel):
     target_patient_set: list[str]
     path: str
     prediction_event_paths: list[str] = []
+
+    @field_validator("path")
+    @classmethod
+    def _safe(cls, v: str) -> str:
+        return db.check_path(v)
 
 
 class Job_Out(BaseModel):
@@ -80,8 +92,33 @@ def _wipe_warning(path: str) -> str:
     )
 
 
-@custodian_router.post("/jobs/build", response_model=Job_Out)
-def build(body: Build_In) -> Job_Out:
+def _assert_may_touch(principal: Principal, path: str) -> None:
+    """Refuse a path this account does not own.
+
+    This is the check the whole role split rests on. Submitting a job deletes
+    every fact under `path` first (see _wipe_warning), and `path` is whatever
+    the caller sent - so without this a researcher could wipe any subtree by
+    naming it.
+    """
+    if authz.may_touch(principal, path=path):
+        return
+
+    owner = authz.owner_of_path(path)
+    audit.event("authz_denied", subject=principal.username, status="error",
+                path=path, reason="not the owner")
+    raise HTTPException(
+        403,
+        f"{path} belongs to {owner}" if owner else
+        f"no model at {path} is recorded as yours - submitting would delete "
+        "every fact under that path, so only its owner or a custodian may.",
+    )
+
+
+@router.post("/jobs/build", response_model=Job_Out)
+def build(body: Build_In,
+          principal: Principal = Depends(current_principal)) -> Job_Out:
+    _assert_may_touch(principal, body.path)
+
     # Without this the job queues happily and then dies in the worker with
     # "'NoneType' object has no attribute 'replace'", which says nothing about
     # the actual problem: there is no model config at this path.
@@ -106,8 +143,11 @@ def build(body: Build_In) -> Job_Out:
                    warnings=[_wipe_warning(body.path)])
 
 
-@custodian_router.post("/jobs/apply", response_model=Job_Out)
-def apply(body: Apply_In) -> Job_Out:
+@router.post("/jobs/apply", response_model=Job_Out)
+def apply(body: Apply_In,
+          principal: Principal = Depends(current_principal)) -> Job_Out:
+    _assert_may_touch(principal, body.path)
+
     if not ml_blob.is_built_at_path(body.path):
         raise HTTPException(409, f"no trained model at {body.path} — build it first")
 

@@ -1,9 +1,11 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from app.core import audit, cohorts, etl_api, ml_blob, ml_registry
+from app.api.deps import current_principal
+from app.core import audit, authz, cohorts, db, etl_api, ml_blob, ml_registry
+from app.core.auth import Principal
 from app.core.config import settings
 
 router = APIRouter()
@@ -85,6 +87,21 @@ class Ml_Concept_In(BaseModel):
     description: str
     blob: Blob_In
 
+    @field_validator("code")
+    @classmethod
+    def _safe_code(cls, v: str) -> str:
+        # This becomes a concept_cd and is interpolated into SQL by ml_blob.
+        return db.check_code(v)
+
+    @field_validator("path")
+    @classmethod
+    def _safe_path(cls, v: str) -> str:
+        # Never validated until now, despite flowing into _coded_path, into
+        # ETL query params, and back out of the database into ml_blob's
+        # queries. data_paths and label_paths were already checked; this was
+        # the gap between them.
+        return db.check_path(v)
+
 
 class Ml_Concept(BaseModel):
     code: str
@@ -100,6 +117,11 @@ class Ml_Concept(BaseModel):
     # means the model is trained but its data is gone — applying it scores every
     # patient off zero-filled columns.
     features_present: bool | None = None
+    # Who created it, and whether the caller may build, apply, edit or delete
+    # it. Sent so the frontend can render the right controls instead of
+    # inferring a rule that would then drift from the server's.
+    owner: str | None = None
+    mine: bool = False
 
 
 class Model_Field(BaseModel):
@@ -161,14 +183,46 @@ def list_model_types() -> list[Model_Type]:
 
 
 @router.get("/ml-concepts", response_model=list[Ml_Concept])
-def list_ml_concepts(path: str = settings.ml_root) -> list[Ml_Concept]:
-    return [Ml_Concept(**c) for c in ml_blob.list_ml_concepts(path)]
+def list_ml_concepts(
+    path: str = settings.ml_root,
+    principal: Principal = Depends(current_principal),
+) -> list[Ml_Concept]:
+    owners = authz.owners()
+    out = []
+    for c in ml_blob.list_ml_concepts(path):
+        owner = owners.get(c["code"])
+        out.append(Ml_Concept(
+            **c, owner=owner,
+            mine=authz.may_touch(principal, code=c["code"]),
+        ))
+    return out
 
 
-@custodian_router.post("/ml-concepts", response_model=Ml_Concept_Out)
-def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
+@router.post("/ml-concepts", response_model=Ml_Concept_Out)
+def create_ml_concept(
+    body: Ml_Concept_In,
+    principal: Principal = Depends(current_principal),
+) -> Ml_Concept_Out:
     if "'" in body.description:
         raise HTTPException(400, "description cannot contain an apostrophe")
+
+    # A researcher's models live under their own namespace, and re-saving
+    # someone else's is not an edit they may make. Both checks run before
+    # anything is written.
+    if principal.is_researcher:
+        ns = authz.researcher_namespace(principal.username)
+        if not authz.in_namespace(body.path, ns):
+            raise HTTPException(
+                403,
+                f"researchers may only create models under {ns} - a build "
+                "deletes every fact under the path it is given, so the path "
+                "has to be one you own",
+            )
+        if ml_blob.exists(body.code) and not authz.may_touch(principal, code=body.code):
+            raise HTTPException(
+                403,
+                f"{body.code} belongs to {authz.owner_of(body.code) or 'someone else'}",
+            )
 
     all_cohorts = cohorts.list_cohorts()
     referenced = set(body.blob.positive_patient_set + body.blob.negative_patient_set)
@@ -246,14 +300,18 @@ def create_ml_concept(body: Ml_Concept_In) -> Ml_Concept_Out:
             "description": body.description,
             "blob": blob,
         })
+    authz.record_owner(body.code, body.path, principal.id)
     audit.event("model_saved", subject=body.code, path=body.path,
                 model_type=body.blob.model_type, replaced=existed,
-                warning_count=len(warnings))
+                owner=principal.username, warning_count=len(warnings))
     return Ml_Concept_Out(code=body.code, warnings=warnings)
 
 
-@custodian_router.delete("/ml-concepts/{code}", response_model=Ml_Concept_Deleted)
-def delete_ml_concept(code: str) -> Ml_Concept_Deleted:
+@router.delete("/ml-concepts/{code}", response_model=Ml_Concept_Deleted)
+def delete_ml_concept(
+    code: str,
+    principal: Principal = Depends(current_principal),
+) -> Ml_Concept_Deleted:
     """Remove one model, instead of wiping every concept to be rid of it.
 
     Until this existed the only removal path was `delete concept`, which
@@ -268,6 +326,14 @@ def delete_ml_concept(code: str) -> Ml_Concept_Deleted:
     )
     if match is None:
         raise HTTPException(404, f"no model with code {code!r}")
+
+    if not authz.may_touch(principal, code=code):
+        owner = authz.owner_of(code)
+        raise HTTPException(
+            403,
+            f"{code} belongs to {owner}" if owner else
+            f"{code} has no recorded owner, so only a custodian may delete it",
+        )
 
     was_built = match.get("is_built", False)
     etl_api.delete("/etl/concepts", params={"cpath": _coded_path(match["path"])})

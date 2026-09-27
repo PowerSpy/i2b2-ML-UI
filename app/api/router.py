@@ -93,14 +93,16 @@ api_router.include_router(cohorts.custodian_router, tags=["cohorts"],
 api_router.include_router(watcher.custodian_router, tags=["watcher"],
                           dependencies=CUSTODIAN)
 
-# Build and apply are custodian-only *for now*. Both delete every fact under a
-# caller-supplied path before running (jobs.py:71-76), so until model ownership
-# exists they are a warehouse-wide delete primitive rather than a researcher
-# action. Ownership is the next step; these open up then.
+# Job reset is queue surgery: it flips someone else's PROCESSING row back to
+# PENDING, and getting it wrong starts a second worker on a live job.
 api_router.include_router(jobs.custodian_router, tags=["jobs"],
                           dependencies=CUSTODIAN)
 
-# Same reasoning: a model config names the path that build then wipes, so
-# creating and deleting models waits for ownership too.
-api_router.include_router(ml_models.custodian_router, tags=["ml-concepts"],
-                          dependencies=CUSTODIAN)
+# Build, apply, and model create/delete are open to any signed-in account and
+# gated *inside* the handler on ownership instead. They cannot be decided from
+# the route alone: whether a researcher may submit a build depends on whether
+# the path they submitted is theirs, which only the body says.
+#
+# jobs.py:_assert_may_touch and ml_models' authz.may_touch are the real
+# boundary for these four; the census test pins them so they cannot quietly
+# become open.
