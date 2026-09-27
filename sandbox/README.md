@@ -7,6 +7,8 @@ in and the code that drives it.
 app/api/transform.py      the endpoint
 app/core/synthetic.py     builds a plan from the published data dictionary
 app/core/sandbox.py       the `docker run` line, and reading its exit code
+app/core/spooler.py       answers transform requests from the ETL container
+docker-changes/.../transform_hook.py   the container side of that exchange
 sandbox/Dockerfile        the image
 sandbox/build.sh          pins it to the ETL container's libraries
 sandbox/runner/           what runs inside: guard, materialize, run, validate
@@ -16,8 +18,7 @@ sandbox/runner/           what runs inside: guard, materialize, run, validate
 
 **No egress. Not "no data access."**
 
-On the real path — which does not exist yet; see *Status* — the transform sees
-every patient row it transforms. That is what a feature transform is. What it
+On the real path the transform sees every patient row it transforms. That is what a feature transform is. What it
 cannot do is send those rows anywhere.
 
 Anyone approving a run should know which of those two they are being asked to
