@@ -680,7 +680,7 @@ function TransformCard({ code, mine }) {
         hint="Write Python that reshapes this model's columns before it trains. Your code runs against generated rows, never a patient."
       >
         {mine ? (
-          <ButtonLink href={href(`/model/${encodeURIComponent(code)}/transform`)}>
+          <ButtonLink href={href.transform(code)}>
             open editor
           </ButtonLink>
         ) : (

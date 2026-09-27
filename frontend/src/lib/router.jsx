@@ -136,4 +136,5 @@ export const href = {
   project: (id) => `/project/${encodeURIComponent(id)}`,
   benchmark: (id) => `/project/${encodeURIComponent(id)}/benchmark`,
   model: (code) => `/model/${encodeURIComponent(code)}`,
+  transform: (code) => `/model/${encodeURIComponent(code)}/transform`,
 };
